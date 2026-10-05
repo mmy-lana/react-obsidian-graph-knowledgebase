@@ -64,10 +64,26 @@ const uniqueSlug = async (title: string, excludeNoteId?: ID): Promise<string> =>
   return `${base}-${genId().slice(0, 4)}`;
 };
 
-/** Re-indexes every link row whose target resolves to `slug`. */
+/**
+ * Re-resolves every link row pointing at `slug`.
+ *
+ * A note is never treated as its own backlink: when the resolved target is the
+ * link's own source, the row is cleared back to unresolved so graph edges and
+ * the backlinks inspector stay consistent with link indexing.
+ */
 const resolveLinksForSlug = async (db: ReturnType<typeof getDb>, slug: string): Promise<void> => {
+  const rows = await db.links.where('targetSlug').equals(slug).toArray();
+  if (rows.length === 0) return;
+
   const target = await db.notes.where('slug').equals(slug).first();
-  await db.links.where('targetSlug').equals(slug).modify({ targetNoteId: target ? target.id : null });
+  const targetNoteId = target ? target.id : null;
+
+  const updated = rows.map((link) => ({
+    ...link,
+    targetNoteId: targetNoteId !== null && link.sourceNoteId !== targetNoteId ? targetNoteId : null,
+  }));
+
+  await db.links.bulkPut(updated);
 };
 
 /**
@@ -87,17 +103,20 @@ const indexLinksForNote = async (
     await db.links.bulkDelete(stale.map((link) => link.id));
   }
 
+  // Only the referenced slugs are looked up: this runs on every debounced
+  // keystroke, so a full table scan would dominate write latency on large vaults.
+  const targetSlugs = Array.from(slugTargets);
+  const matchingNotes =
+    targetSlugs.length > 0 ? await db.notes.where('slug').anyOf(targetSlugs).toArray() : [];
   const bySlug = new Map(
-    (await db.notes.filter((candidate) => candidate.id !== note.id).toArray()).map((candidate) => [
-      candidate.slug,
-      candidate.id,
-    ]),
+    matchingNotes.filter((candidate) => candidate.id !== note.id).map((candidate) => [candidate.slug, candidate.id]),
   );
 
   const rows: NoteLink[] = wikilinks.map((wikilink) => ({
     id: buildLinkId(note.id, wikilink.targetSlug),
     sourceNoteId: note.id,
     targetSlug: wikilink.targetSlug,
+    // Self-links stay unresolved: a note is never its own backlink.
     targetNoteId: bySlug.get(wikilink.targetSlug) ?? null,
     alias: wikilink.alias ?? null,
     createdAt: note.createdAt,
@@ -190,6 +209,9 @@ export function useNotes(): NotesApi {
         };
 
         await db.notes.add(note);
+        // Resolve pre-existing ghost links that were waiting for this title, so
+        // backlinks and graph edges light up without editing the source notes.
+        await resolveLinksForSlug(db, note.slug);
         setActiveNoteId(note.id);
         setError(null);
         return note;

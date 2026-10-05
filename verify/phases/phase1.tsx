@@ -22,6 +22,8 @@ import {
   parseFrontmatter,
   stringifyFrontmatter,
 } from '../../src/services/markdown/parser';
+import backlinksSource from '../../src/components/domain/inspector/BacklinksList.tsx?raw';
+import { renderMarkdown } from '../../src/services/markdown/renderer';
 import { getDb, resetDbInstance } from '../../src/services/db/schema';
 import { seedDatabaseIfEmpty, SEED_NOTE_IDS } from '../../src/services/db/seed';
 
@@ -231,6 +233,67 @@ export async function runPhase1(): Promise<HarnessCheck[]> {
       expect(inbound.length > 0, 'backlink index returns rows for target');
       const outgoing = await db.links.where('sourceNoteId').equals(target!.id).toArray();
       expect(outgoing.length > 0, 'outgoing index returns rows for source');
+    }),
+  );
+
+  results.push(
+    await check('SEC-01: mention detection carries no lookbehind assertion', () => {
+      // A negative lookbehind assertion is a fatal SyntaxError on iOS Safari
+      // below 16.4 and on older Android WebViews. The source is guarded
+      // statically so the pattern can never regress, and the portable
+      // capture-group shape is asserted behaviourally below.
+      expect(
+        !backlinksSource.includes('(?<'),
+        'BacklinksList must not use lookbehind assertions',
+      );
+
+      const pattern = new RegExp('(^|[^\\w[])(\\w+)(?![\\w])', 'gi');
+
+      const atStart = pattern.exec('hello world');
+      expect(atStart !== null, 'pattern matched at the start of the text');
+      expectEqual(atStart?.[1] ?? null, '', 'prefix group empty at the start of the text');
+      expectEqual(atStart?.[2] ?? null, 'hello', 'mention captured without lookbehind');
+
+      // After punctuation the prefix group carries the delimiter, so the caller
+      // can offset the mention index by exactly the group length.
+      const punctuationPattern = new RegExp('(^|[^\\w[])(\\w+)(?![\\w])', 'gi');
+      const afterPunctuation = punctuationPattern.exec(':hello world');
+      expect(afterPunctuation !== null, 'pattern matched after punctuation');
+      expectEqual(afterPunctuation?.[1] ?? null, ':', 'prefix group holds the delimiter');
+      expectEqual(afterPunctuation?.[2] ?? null, 'hello', 'mention text stays exact');
+      expectEqual(
+        (afterPunctuation?.index ?? 0) + (afterPunctuation?.[1].length ?? 0),
+        1,
+        'mention offset accounts for the prefix group',
+      );
+
+      // A title must not match inside a longer word.
+      const titlePattern = new RegExp(`(^|[^\\w[])(Graph Theory)(?![\\w])`, 'gi');
+      expectEqual(titlePattern.exec('Graph Theoried out'), null, 'partial word match rejected');
+      const exact = titlePattern.exec('Read Graph Theory today');
+      expectEqual(exact?.[2] ?? null, 'Graph Theory', 'whole-word title matched');
+    }),
+  );
+
+  results.push(
+    await check('DOS-01: deeply nested blockquotes cannot overflow the stack', () => {
+      const hostile = '>'.repeat(5000) + ' deep';
+      const html = renderMarkdown(hostile);
+
+      expect(html.length > 0, 'renderer produced output for hostile input');
+      expect(html.includes('<blockquote>'), 'blockquote wrapper emitted');
+      expect(html.includes('deep'), 'inner text preserved');
+
+      const nested = '>'.repeat(400) + ' bottom';
+      expect(renderMarkdown(nested).includes('bottom'), 'nested quotes still render');
+    }),
+  );
+
+  results.push(
+    await check('DOS-01: moderate nesting still renders structurally', () => {
+      const html = renderMarkdown('> level one\n> > level two\n> > > level three');
+      const quotes = (html.match(/<blockquote>/g) ?? []).length;
+      expectEqual(quotes, 3, 'each nesting level produces a blockquote');
     }),
   );
 

@@ -404,6 +404,82 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
   );
 
   results.push(
+    await check('DATA-01: link indexing resolves only the referenced slugs', async () => {
+      const view = await mount(<NotesHarness />);
+      await waitFor(() => currentApi().notes.length > 0, { label: 'reactive notes query' });
+      const api = currentApi();
+
+      const source = await withAct(() => api.createNote('Index Source'));
+      const target = await withAct(() => api.createNote('Index Target'));
+
+      await withAct(() =>
+        api.updateNoteContent(source.id, 'Points at [[Index Target]] and [[Missing Target]].'),
+      );
+      await flush();
+
+      const links = await getDb().links.where('sourceNoteId').equals(source.id).toArray();
+      expectEqual(links.length, 2, 'both links indexed');
+
+      const resolved = links.find((link) => link.targetSlug === 'index-target');
+      const ghost = links.find((link) => link.targetSlug === 'missing-target');
+      expectEqual(resolved?.targetNoteId, target.id, 'referenced slug resolved to its note');
+      expectEqual(ghost?.targetNoteId, null, 'missing slug stays unresolved');
+
+      // A note that links to its own title must not become its own backlink.
+      await withAct(() => api.updateNoteContent(source.id, 'Self reference [[Index Source]].'));
+      await flush();
+      const selfLinks = await getDb().links.where('sourceNoteId').equals(source.id).toArray();
+      expectEqual(selfLinks.length, 1, 'self link stored once');
+      expectEqual(selfLinks[0].targetNoteId, null, 'self link never resolves');
+
+      await withAct(() => api.deleteNote(source.id));
+      await withAct(() => api.deleteNote(target.id));
+      await flush();
+      await view.unmount();
+    }),
+  );
+
+  results.push(
+    await check('DATA-02: creating a note resolves pre-existing ghost links', async () => {
+      const view = await mount(<NotesHarness />);
+      await waitFor(() => currentApi().notes.length > 0, { label: 'reactive notes query' });
+      const api = currentApi();
+
+      const source = await withAct(() => api.createNote('Ghost Source'));
+      await withAct(() => api.updateNoteContent(source.id, 'Forward reference to [[Planned Note]].'));
+      await flush();
+
+      const beforeCreate = await getDb().links.where('targetSlug').equals('planned-note').toArray();
+      expectEqual(beforeCreate.length, 1, 'forward reference indexed');
+      expectEqual(beforeCreate[0].targetNoteId, null, 'target unresolved before the note exists');
+
+      const created = await withAct(() => api.createNote('Planned Note'));
+
+      const afterCreate = await getDb().links.where('targetSlug').equals('planned-note').toArray();
+      expectEqual(afterCreate.length, 1, 'no duplicate link rows');
+      expectEqual(
+        afterCreate[0].targetNoteId,
+        created.id,
+        'ghost link resolved immediately on note creation',
+      );
+
+      // `getBacklinks` reads the reactive query, so it must be read from the
+      // current render rather than the snapshot captured at the start.
+      await waitFor(() => currentApi().getBacklinks(created.id).length === 1, {
+        label: 'reactive backlink for the newly created note',
+      });
+      const backlinks = currentApi().getBacklinks(created.id);
+      expectEqual(backlinks.length, 1, 'backlink visible without editing the source note');
+      expectEqual(backlinks[0].sourceNoteId, source.id, 'backlink attributed to the source note');
+
+      await withAct(() => api.deleteNote(source.id));
+      await withAct(() => api.deleteNote(created.id));
+      await flush();
+      await view.unmount();
+    }),
+  );
+
+  results.push(
     await check('MarkdownEditor: typing writes through and reports progress', async () => {
       const view = await mount(<EditorHarness />);
       const textarea = view.query<HTMLTextAreaElement>('[data-testid="markdown-editor-textarea"]')!;

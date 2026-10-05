@@ -27,26 +27,40 @@ interface MentionCandidate {
   excerpt: string;
 }
 
-/** Case-insensitive whole-word search for the active note's title. */
+/**
+ * Case-insensitive whole-word search for the active note's title.
+ *
+ * The leading boundary is expressed with a capture group rather than a negative
+ * lookbehind assertion: lookbehind is a fatal `SyntaxError` on iOS Safari below
+ * 16.4 and on older Android WebViews, which would take the whole app down.
+ */
 function findUnlinkedMentions(activeNote: Note, notes: Note[]): MentionCandidate[] {
   const title = activeNote.title.trim();
   if (title.length < 3) return [];
 
-  const pattern = new RegExp(`(?<![\\w[])(${escapeRegex(title)})(?![\\w])`, 'gi');
+  const pattern = new RegExp(`(^|[^\\w[])(${escapeRegex(title)})(?![\\w])`, 'gi');
   const candidates: MentionCandidate[] = [];
 
   for (const note of notes) {
     if (note.id === activeNote.id || note.isArchived) continue;
     if (extractWikilinks(note.content).some((link) => link.targetSlug === activeNote.slug)) continue;
 
+    // The pattern is reused across notes, so reset the scan cursor first.
+    pattern.lastIndex = 0;
+
     const match = pattern.exec(note.content);
     if (!match) continue;
+
+    // Group 1 is the boundary prefix (empty at the start of the text), group 2
+    // is the mention itself; the offset keeps excerpts anchored to the match.
+    const mention = match[2];
+    const mentionIndex = match.index + match[1].length;
 
     candidates.push({
       sourceNoteId: note.id,
       sourceTitle: note.title,
-      mention: match[1],
-      excerpt: excerptAround(note.content, match[1], 48),
+      mention,
+      excerpt: excerptAround(note.content, mention, 48, mentionIndex),
     });
   }
 

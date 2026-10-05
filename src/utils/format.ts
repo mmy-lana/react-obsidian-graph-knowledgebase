@@ -106,22 +106,29 @@ export const truncate = (text: string, maxLength: number, ellipsis = '…'): str
   return `${(lastSpace > maxLength * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}${ellipsis}`;
 };
 
-/** Extract a single-line excerpt centred on the first occurrence of `needle`. */
+/**
+ * Extract a single-line excerpt centred on an occurrence of `needle`.
+ *
+ * @param fromIndex optional lower bound for the search, used when the caller
+ *   already knows the exact match offset (for example after a regex scan).
+ */
 export const excerptAround = (
   content: string,
   needle: string,
   radius = 60,
+  fromIndex = 0,
 ): string => {
   if (!needle) return truncate(content, radius * 2);
 
-  const index = content.toLowerCase().indexOf(needle.toLowerCase());
+  const start = Math.max(0, fromIndex);
+  const index = content.toLowerCase().indexOf(needle.toLowerCase(), start);
   if (index === -1) return truncate(content, radius * 2);
 
-  const start = Math.max(0, index - radius);
-  const end = Math.min(content.length, index + needle.length + radius);
-  const slice = content.slice(start, end).replace(/\s+/g, ' ').trim();
+  const excerptStart = Math.max(0, index - radius);
+  const excerptEnd = Math.min(content.length, index + needle.length + radius);
+  const slice = content.slice(excerptStart, excerptEnd).replace(/\s+/g, ' ').trim();
 
-  return `${start > 0 ? '…' : ''}${slice}${end < content.length ? '…' : ''}`;
+  return `${excerptStart > 0 ? '…' : ''}${slice}${excerptEnd < content.length ? '…' : ''}`;
 };
 
 /** `1 note` / `4 notes` pluralisation helper. */

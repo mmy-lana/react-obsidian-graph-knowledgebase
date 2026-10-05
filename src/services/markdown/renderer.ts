@@ -79,6 +79,9 @@ const splitTableRow = (row: string): string[] =>
     .split('|')
     .map((cell) => cell.trim());
 
+/** Maximum blockquote nesting before the remainder is rendered flat. */
+const MAX_BLOCKQUOTE_DEPTH = 8;
+
 /**
  * Converts markdown to HTML.
  *
@@ -89,8 +92,12 @@ const splitTableRow = (row: string): string[] =>
  * Wikilinks and tags are emitted as `data-wikilink` / `data-tag` elements so
  * the preview can delegate interaction (navigation, filtering) from a single
  * container handler instead of inline scripts.
+ *
+ * @param depth internal recursion depth for nested blockquotes. Deeply nested
+ *   input is flattened instead of recursing, which would otherwise overflow the
+ *   call stack on hostile documents.
  */
-export function renderMarkdown(markdown: string): string {
+export function renderMarkdown(markdown: string, depth = 0): string {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const html: string[] = [];
 
@@ -176,7 +183,13 @@ export function renderMarkdown(markdown: string): string {
         buffer.push(lines[index].replace(/^>\s?/, ''));
         index += 1;
       }
-      html.push(`<blockquote>${renderMarkdown(buffer.join('\n'))}</blockquote>`);
+
+      const nested = buffer.join('\n');
+      const rendered =
+        depth >= MAX_BLOCKQUOTE_DEPTH
+          ? `<p>${renderInline(nested)}</p>`
+          : renderMarkdown(nested, depth + 1);
+      html.push(`<blockquote>${rendered}</blockquote>`);
       continue;
     }
 
