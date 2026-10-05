@@ -97,7 +97,7 @@ export async function runPhase1(): Promise<HarnessCheck[]> {
       expectEqual(formatRelativeTime(now - 3 * 3_600_000, now), '3h ago', 'hours');
       expectEqual(formatRelativeTime(now - 2 * 86_400_000, now), '2d ago', 'days');
       expectEqual(toIsoDate(Date.UTC(2026, 0, 15, 12, 0, 0)), '2026-01-15', 'iso date');
-      expect(typeof formatDate(now), 'string');
+      expectEqual(typeof formatDate(now), 'string', 'formatDate returns a string');
     }),
   );
 

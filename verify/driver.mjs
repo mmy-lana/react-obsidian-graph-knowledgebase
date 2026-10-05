@@ -38,7 +38,7 @@ export function resolveChromePath() {
 
 /** Typechecks (`tsc -b`) then bundles (`vite build`); throws on any error. */
 export function buildProject() {
-  console.log('\n▸ typecheck (tsc -b)');
+  console.log('\n▸ typecheck (app: tsc -b)');
   const typecheck = spawnSync(TSC_BIN, ['-b', '--force'], {
     cwd: ROOT,
     encoding: 'utf8',
@@ -47,9 +47,22 @@ export function buildProject() {
   if (typecheck.status !== 0) {
     console.log(typecheck.stdout ?? '');
     console.log(typecheck.stderr ?? '');
-    throw new Error(`typecheck failed with exit code ${typecheck.status}`);
+    throw new Error(`app typecheck failed with exit code ${typecheck.status}`);
   }
-  console.log('  typecheck ok');
+  console.log('  app typecheck ok');
+
+  console.log('▸ typecheck (verify harness: tsconfig.verify.json)');
+  const harnessTypecheck = spawnSync(TSC_BIN, ['-p', 'tsconfig.verify.json', '--noEmit'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  if (harnessTypecheck.status !== 0) {
+    console.log(harnessTypecheck.stdout ?? '');
+    console.log(harnessTypecheck.stderr ?? '');
+    throw new Error(`verification harness typecheck failed (exit ${harnessTypecheck.status})`);
+  }
+  console.log('  harness typecheck ok');
 
   console.log('▸ bundle (vite build)');
   const bundle = spawnSync(VITE_BIN, ['build'], {

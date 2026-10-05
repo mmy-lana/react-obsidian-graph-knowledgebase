@@ -1,30 +1,302 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Design tokens — Minimal Dark Slate
+   --------------------------------------------------------------------------- */
 @theme {
   --color-canvas: #090d16;
   --color-surface: #0f172a;
   --color-elevated: #1e293b;
   --color-border: #334155;
+
   --color-node-cyan: #38bdf8;
   --color-node-purple: #a855f7;
   --color-node-amber: #fbbf24;
   --color-node-rose: #fb7185;
+
   --color-text-main: #f1f5f9;
   --color-text-muted: #94a3b8;
   --color-text-subtle: #64748b;
+
+  --color-accent-soft: color-mix(in srgb, var(--color-node-cyan) 18%, transparent);
+  --color-danger-soft: color-mix(in srgb, var(--color-node-rose) 18%, transparent);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --animate-sheet-up: sheet-up 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-pop-in: pop-in 140ms cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-fade-out: fade-out 120ms ease-in;
 }
 
-:root {
-  color-scheme: dark;
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
-body {
-  margin: 0;
-  padding: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  background-color: var(--color-canvas);
-  color: var(--color-text-main);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Base layer
+   --------------------------------------------------------------------------- */
+@layer base {
+  :root {
+    color-scheme: dark;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-text-main);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none;
+  }
+
+  /* Text inputs must never trigger the iOS zoom animation. */
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-node-cyan);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-text-main);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-border);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-text-subtle);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Custom utilities
+   --------------------------------------------------------------------------- */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Bottom padding that respects the iOS home-indicator safe area. */
+@utility pb-safe {
+  padding-bottom: calc(0.5rem + var(--safe-bottom));
+}
+
+@utility h-safe-bottom {
+  height: var(--safe-bottom);
+}
+
+/* Guarantees a 44px tap target even when the visual box is smaller. */
+@utility tap-target {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 50% 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* Markdown preview typography. */
+@layer components {
+  .kb-prose {
+    color: var(--color-text-main);
+    font-size: 0.9375rem;
+    line-height: 1.7;
+  }
+
+  .kb-prose > * + * {
+    margin-top: 0.85em;
+  }
+
+  .kb-prose h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .kb-prose h2 {
+    font-size: 1.25rem;
+    font-weight: 650;
+  }
+
+  .kb-prose h3 {
+    font-size: 1.0625rem;
+    font-weight: 600;
+  }
+
+  .kb-prose h4,
+  .kb-prose h5,
+  .kb-prose h6 {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  .kb-prose ul,
+  .kb-prose ol {
+    padding-left: 1.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .kb-prose ul {
+    list-style: disc;
+  }
+
+  .kb-prose ol {
+    list-style: decimal;
+  }
+
+  .kb-prose li::marker {
+    color: var(--color-text-subtle);
+  }
+
+  .kb-prose blockquote {
+    border-left: 3px solid var(--color-node-cyan);
+    padding-left: 0.85rem;
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  .kb-prose code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--color-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 0.35rem;
+    padding: 0.1rem 0.3rem;
+  }
+
+  .kb-prose pre {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 0.6rem;
+    padding: 0.85rem;
+    overflow-x: auto;
+  }
+
+  .kb-prose pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: 0.8125rem;
+  }
+
+  .kb-prose table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    display: block;
+    overflow-x: auto;
+  }
+
+  .kb-prose th,
+  .kb-prose td {
+    border: 1px solid var(--color-border);
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+  }
+
+  .kb-prose th {
+    background: var(--color-elevated);
+    font-weight: 600;
+  }
+
+  .kb-prose hr {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .kb-prose a {
+    color: var(--color-node-cyan);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

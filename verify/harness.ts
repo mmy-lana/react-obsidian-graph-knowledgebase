@@ -15,7 +15,7 @@ const SUPPORTED_PHASES = ['phase1', 'phase2', 'phase3', 'phase4', 'phase5'] as c
  * statically resolve a suite that has not been written yet.
  */
 async function loadPhase(phase: string): Promise<PhaseModule> {
-  const specifier = `./phases/${phase}.ts`;
+  const specifier = `./phases/${phase}.tsx`;
   const module = (await import(/* @vite-ignore */ specifier)) as Record<string, unknown>;
   const run = module[`run${phase.charAt(0).toUpperCase()}${phase.slice(1)}`];
 

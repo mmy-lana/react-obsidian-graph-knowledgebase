@@ -21,36 +21,54 @@ const args = process.argv.slice(2);
 const phase = args.find((a) => !a.startsWith('--')) ?? 'phase1';
 const skipBuild = args.includes('--no-build');
 
+const MODULE_VIEWPORTS = [
+  { width: 390, height: 844, mobile: true, touch: true },
+  { width: 1280, height: 900, mobile: false, touch: false },
+];
+
 async function runModuleSuite(page, devOrigin, list) {
-  const url = `${devOrigin}/verify/harness.html?phase=${phase}`;
-  console.log(`\n▸ module suite ${url}`);
-  await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
-  await page.goto(url);
+  for (const viewport of MODULE_VIEWPORTS) {
+    const url = `${devOrigin}/verify/harness.html?phase=${phase}`;
+    const label = `${viewport.width}px`;
+    console.log(`\n▸ module suite ${label} ${url}`);
 
-  try {
-    await page.waitForFunction(() => Boolean(window.__VERIFY__?.done), { timeout: 60_000 });
-  } catch (error) {
-    const partial = await page.evaluate(() => window.__VERIFY__ ?? null);
-    throw new Error(`harness did not finish: ${error.message}; state=${JSON.stringify(partial)}`);
+    await page.setViewport({
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: 1,
+      mobile: viewport.mobile,
+      touch: viewport.touch,
+    });
+    await page.goto(url);
+
+    try {
+      await page.waitForFunction(() => Boolean(window.__VERIFY__?.done), { timeout: 60_000 });
+    } catch (error) {
+      const partial = await page.evaluate(() => window.__VERIFY__ ?? null);
+      throw new Error(
+        `harness did not finish at ${label}: ${error.message}; state=${JSON.stringify(partial)}`,
+      );
+    }
+
+    const state = await page.evaluate(() => window.__VERIFY__);
+    if (state.error) throw new Error(`harness error at ${label}: ${state.error}`);
+
+    for (const result of state.results) {
+      const name = `[${label}] ${result.name}`;
+      console.log(
+        result.ok
+          ? `  PASS  ${name}${result.detail ? ` — ${result.detail}` : ''}`
+          : `  FAIL  ${name} — ${result.detail}`,
+      );
+      list.results.push({ name, ok: result.ok, detail: result.detail });
+    }
+
+    await list.check(`[${label}] module suite produced no console errors`, () => {
+      const { errors, failedRequests } = page.diagnostics;
+      assert(errors.length === 0, errors.join(' | ') || 'unknown console error');
+      assert(failedRequests.length === 0, failedRequests.join(' | ') || 'unknown failed request');
+    });
   }
-
-  const state = await page.evaluate(() => window.__VERIFY__);
-  if (state.error) throw new Error(`harness error: ${state.error}`);
-
-  for (const result of state.results) {
-    console.log(
-      result.ok
-        ? `  PASS  ${result.name}${result.detail ? ` — ${result.detail}` : ''}`
-        : `  FAIL  ${result.name} — ${result.detail}`,
-    );
-    list.results.push({ name: result.name, ok: result.ok, detail: result.detail });
-  }
-
-  await list.check('module suite produced no console errors', () => {
-    const { errors, failedRequests } = page.diagnostics;
-    assert(errors.length === 0, errors.join(' | ') || 'unknown console error');
-    assert(failedRequests.length === 0, failedRequests.join(' | ') || 'unknown failed request');
-  });
 }
 
 async function runAppSuite(page, origin, spec, list) {
