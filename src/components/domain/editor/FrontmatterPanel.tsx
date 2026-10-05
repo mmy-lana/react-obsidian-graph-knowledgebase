@@ -11,6 +11,12 @@ import type { Frontmatter, Note } from '../../../types/models';
 export interface FrontmatterPanelProps {
   note: Note | null;
   onChange: (frontmatter: Frontmatter) => void;
+  /**
+   * Commits a title edit through the full rename cascade (note title, slug and
+   * every referencing `[[wikilink]]`). Invoked on blur or Enter, never per
+   * keystroke, so a rename is always a single atomic operation.
+   */
+  onRenameTitle?: (title: string) => void;
   onSelectTag?: (tag: string) => void;
   className?: string;
   testId?: string;
@@ -34,9 +40,18 @@ const draftFrom = (note: Note | null): DraftState => ({
 
 /**
  * Structured editor for the YAML frontmatter block of the active note.
- * Changes are applied immediately through `onChange`.
+ * Aliases, tags and dates apply immediately through `onChange`; the title is
+ * routed through `onRenameTitle` so the note title, slug and referencing links
+ * stay consistent.
  */
-export function FrontmatterPanel({ note, onChange, onSelectTag, className = '', testId = 'frontmatter-panel' }: FrontmatterPanelProps) {
+export function FrontmatterPanel({
+  note,
+  onChange,
+  onRenameTitle,
+  onSelectTag,
+  className = '',
+  testId = 'frontmatter-panel',
+}: FrontmatterPanelProps) {
   const [draft, setDraft] = useState<DraftState>(() => draftFrom(note));
   const [newAlias, setNewAlias] = useState('');
   const [newTag, setNewTag] = useState('');
@@ -61,12 +76,28 @@ export function FrontmatterPanel({ note, onChange, onSelectTag, className = '', 
   const publish = (next: DraftState) => {
     setDraft(next);
     onChange({
-      title: next.title.trim() || note.title,
+      // The title is owned by the rename cascade when one is wired up, so the
+      // frontmatter write never races it with a stale value.
+      title: onRenameTitle ? note.frontmatter.title ?? note.title : next.title.trim() || note.title,
       aliases: next.aliases.length > 0 ? next.aliases : undefined,
       tags: next.tags.length > 0 ? next.tags : undefined,
       created: next.created || undefined,
       updated: next.updated || undefined,
     });
+  };
+
+  const commitTitle = () => {
+    const next = draft.title.trim();
+    if (!next || next === note.title) {
+      setDraft(draftFrom(note));
+      return;
+    }
+
+    if (onRenameTitle) {
+      onRenameTitle(next);
+    } else {
+      publish(draft);
+    }
   };
 
   return (
@@ -78,7 +109,19 @@ export function FrontmatterPanel({ note, onChange, onSelectTag, className = '', 
       <Input
         label="Title"
         value={draft.title}
-        onChange={(event) => publish({ ...draft, title: event.target.value })}
+        hint={onRenameTitle ? 'Renaming updates every [[wikilink]] that points here' : undefined}
+        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+        onBlur={commitTitle}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commitTitle();
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            setDraft(draftFrom(note));
+          }
+        }}
         testId="frontmatter-title"
       />
 

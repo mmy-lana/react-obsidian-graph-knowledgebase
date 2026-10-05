@@ -203,5 +203,97 @@ export async function runPhase5(): Promise<import('../support').HarnessCheck[]> 
     }),
   );
 
+  results.push(
+    await check('DATA-06: a failed import rolls back to the pre-import vault', async () => {
+      const beforeNotes = await db.notes.count();
+      const beforeFolders = await db.folders.count();
+      const beforeLinks = await db.links.count();
+
+      const hostile = {
+        get length(): number {
+          throw new Error('synthetic read failure');
+        },
+        [Symbol.iterator]: function* iterator() {
+          throw new Error('synthetic iterator failure');
+        },
+      } as unknown as Parameters<typeof importNotes>[0];
+
+      let rejected = false;
+      try {
+        await importNotes(hostile);
+      } catch {
+        rejected = true;
+      }
+
+      expectEqual(rejected, true, 'failed import surfaced the error');
+      expectEqual(await db.notes.count(), beforeNotes, 'no notes left behind by the failed import');
+      expectEqual(await db.folders.count(), beforeFolders, 'no folders left behind');
+      expectEqual(await db.links.count(), beforeLinks, 'link index untouched');
+    }),
+  );
+
+  results.push(
+    await check('DATA-06: imports commit atomically with folders and links', async () => {
+      const summary = await importNotes([
+        parseMarkdownFile('Atomic/One.md', 'Links to [[Atomic Two]] and #atomic'),
+        parseMarkdownFile(
+          'Atomic/Two.md',
+          '---\ntitle: Atomic Two\n---\nTarget of the forward link',
+        ),
+      ]);
+
+      expectEqual(summary.imported, 2, 'both notes imported');
+
+      const folders = await db.folders.toArray();
+      expect(folders.some((folder) => folder.name === 'Atomic'), 'folder created inside the transaction');
+
+      const links = await db.links.where('targetSlug').equals('atomic-two').toArray();
+      expectEqual(links.length, 1, 'forward link indexed');
+      expectEqual(links[0].targetNoteId !== null, true, 'link resolved inside the same transaction');
+
+      const snapshot: VaultBackup = await exportVault();
+      const restored = await restoreVaultBackup(snapshot);
+      expectEqual(restored.updated, snapshot.notes.length, 'vault restored for later checks');
+    }),
+  );
+
+  results.push(
+    await check('DATA-04: batch markdown downloads are paced', async () => {
+      const originalClick = HTMLAnchorElement.prototype.click;
+      const originalRevoke = URL.revokeObjectURL;
+      const timestamps: number[] = [];
+
+      HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement) {
+        timestamps.push(performance.now());
+      };
+      URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+
+      try {
+        const folders = Object.fromEntries((await db.folders.toArray()).map((f) => [f.id, f.name]));
+        const started = performance.now();
+        const count = await downloadMarkdownFiles(folders, { paceMs: 60 });
+        const elapsed = performance.now() - started;
+
+        expectEqual(count, timestamps.length, 'one download per note');
+        expectEqual(count, await db.notes.count(), 'every note exported');
+
+        if (count > 2) {
+          const firstGap = timestamps[1] - timestamps[0];
+          expect(
+            firstGap >= 40,
+            `downloads must be paced (first gap was ${Math.round(firstGap)}ms)`,
+          );
+          expect(
+            elapsed >= (count - 1) * 40,
+            `total export duration must reflect pacing (${Math.round(elapsed)}ms)`,
+          );
+        }
+      } finally {
+        HTMLAnchorElement.prototype.click = originalClick;
+        URL.revokeObjectURL = originalRevoke;
+      }
+    }),
+  );
+
   return results;
 }

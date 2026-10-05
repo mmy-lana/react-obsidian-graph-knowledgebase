@@ -464,9 +464,27 @@ export function useNotes(): NotesApi {
         const db = getDb();
 
         await db.transaction('rw', [db.folders, db.notes], async () => {
-          const descendants = await db.folders.filter((folder) => folder.parentId === id).toArray();
-          const folderIds = [id, ...descendants.map((folder) => folder.id)];
+          // Walk the whole subtree: deleting only direct children would orphan
+          // grandchildren and leave notes pointing at removed folders.
+          const allFolders = await db.folders.toArray();
+          const descendantIds = new Set<ID>([id]);
+          let discovered = true;
 
+          while (discovered) {
+            discovered = false;
+            for (const folder of allFolders) {
+              if (
+                folder.parentId !== null &&
+                descendantIds.has(folder.parentId) &&
+                !descendantIds.has(folder.id)
+              ) {
+                descendantIds.add(folder.id);
+                discovered = true;
+              }
+            }
+          }
+
+          const folderIds = Array.from(descendantIds);
           await db.notes.where('folderId').anyOf(folderIds).modify({ folderId: null });
           await db.folders.bulkDelete(folderIds);
         });

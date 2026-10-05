@@ -5,6 +5,7 @@
 import { useRef, useState } from 'react';
 import { check, expect, expectEqual, type HarnessCheck } from '../support';
 import {
+  blurElement,
   click,
   clickTarget,
   fireKeyDown,
@@ -480,6 +481,43 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
   );
 
   results.push(
+    await check('DATA-03: folder deletion removes the whole subtree', async () => {
+      const view = await mount(<NotesHarness />);
+      await waitFor(() => currentApi().notes.length > 0, { label: 'reactive notes query' });
+      const api = currentApi();
+
+      const parent = await withAct(() => api.createFolder('Parent'));
+      const child = await withAct(() => api.createFolder('Child', parent.id));
+      const grandchild = await withAct(() => api.createFolder('Grandchild', child.id));
+      const note = await withAct(() => api.createNote('Deep Note'));
+      await withAct(() => api.moveNote(note.id, grandchild.id));
+
+      expectEqual((await getDb().folders.get(child.id))?.parentId, parent.id, 'child linked to parent');
+
+      await withAct(() => api.deleteFolder(parent.id));
+      await flush();
+
+      expectEqual(await getDb().folders.get(parent.id), undefined, 'parent deleted');
+      expectEqual(await getDb().folders.get(child.id), undefined, 'child deleted');
+      expectEqual(await getDb().folders.get(grandchild.id), undefined, 'grandchild deleted');
+
+      const orphaned = await getDb().notes.get(note.id);
+      expectEqual(orphaned?.folderId, null, 'note returned to the vault root');
+      expectEqual(orphaned?.content !== undefined, true, 'note content preserved');
+
+      const remainingFolders = await getDb().folders.toArray();
+      expect(
+        !remainingFolders.some((folder) => folder.parentId === parent.id),
+        'no folder keeps a dangling parent reference',
+      );
+
+      await withAct(() => api.deleteNote(note.id));
+      await flush();
+      await view.unmount();
+    }),
+  );
+
+  results.push(
     await check('MarkdownEditor: typing writes through and reports progress', async () => {
       const view = await mount(<EditorHarness />);
       const textarea = view.query<HTMLTextAreaElement>('[data-testid="markdown-editor-textarea"]')!;
@@ -644,6 +682,35 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
       await empty.unmount();
 
       await view.unmount();
+    }),
+  );
+
+  results.push(
+    await check('DATA-05: frontmatter title edits run the rename cascade', async () => {
+      const renames: string[] = [];
+      const view = await mount(
+        <FrontmatterHarness
+          onUpdate={() => undefined}
+          onRename={(title) => renames.push(title)}
+        />,
+      );
+
+      const titleInput = view.query<HTMLInputElement>('[data-testid="frontmatter-title"]')!;
+      expectEqual(titleInput.value, 'Welcome to Obsidian Clone', 'title pre-filled from frontmatter');
+
+      await setInputValue(titleInput, 'Renamed From Frontmatter');
+      await flush();
+
+      expectEqual(renames, [], 'no rename while typing');
+
+      await blurElement(titleInput);
+
+      expectEqual(renames, ['Renamed From Frontmatter'], 'blur commits exactly one rename');
+
+      await setInputValue(titleInput, '   ');
+      await blurElement(titleInput);
+      await flush();
+      expectEqual(renames.length, 1, 'blank titles never trigger a rename');
     }),
   );
 
@@ -880,7 +947,13 @@ function MarkdownPreviewHarness({
   return <MarkdownPreview content={content} onOpenLink={onOpenLink} onClickTag={onClickTag} />;
 }
 
-function FrontmatterHarness({ onUpdate }: { onUpdate: (next: Record<string, unknown>) => void }) {
+function FrontmatterHarness({
+  onUpdate,
+  onRename,
+}: {
+  onUpdate: (next: Record<string, unknown>) => void;
+  onRename?: (title: string) => void;
+}) {
   const notes = useNotes();
   api = notes;
   const note = notes.notes.find((candidate) => candidate.slug === 'welcome-to-obsidian-clone') ?? null;
@@ -889,6 +962,7 @@ function FrontmatterHarness({ onUpdate }: { onUpdate: (next: Record<string, unkn
     <FrontmatterPanel
       note={note}
       onChange={(frontmatter) => onUpdate({ ...frontmatter })}
+      onRenameTitle={onRename}
     />
   );
 }

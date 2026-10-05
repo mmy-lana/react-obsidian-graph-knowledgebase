@@ -288,6 +288,11 @@ export const App: React.FC = () => {
         onChange={(frontmatter) => {
           if (api.activeNoteId) void api.updateFrontmatter(api.activeNoteId, frontmatter);
         }}
+        onRenameTitle={(title) => {
+          // Title edits run through the rename cascade so the note title, slug
+          // and every referencing wikilink stay consistent.
+          if (api.activeNoteId) void api.renameNote(api.activeNoteId, title);
+        }}
         onSelectTag={(tag) => {
           setActiveTag(tag);
           setFilters((current) => ({ ...current, showTags: true }));

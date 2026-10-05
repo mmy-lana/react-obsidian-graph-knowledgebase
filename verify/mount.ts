@@ -107,6 +107,21 @@ export async function focusElement(element: Element | null): Promise<void> {
   });
 }
 
+/**
+ * Focuses and then blurs an element inside `act`.
+ * React listens to `focusout` (not the non-bubbling `blur`), so a real
+ * `element.blur()` is the faithful way to exercise `onBlur` handlers.
+ */
+export async function blurElement(element: Element | null): Promise<void> {
+  if (!element) throw new Error('blur target does not exist');
+  const focusable = element as HTMLElement;
+  await act(async () => {
+    focusable.focus?.();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    focusable.blur?.();
+  });
+}
+
 /** Sets a controlled input value through the native setter, inside `act`. */
 export async function setInputValue(input: HTMLInputElement, value: string): Promise<void> {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
