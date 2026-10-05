@@ -140,12 +140,20 @@ export function ForceGraphCanvas({
     const container = containerRef.current;
     if (!container) return;
 
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (!rect) return;
-      setSize({ width: Math.round(rect.width), height: Math.round(rect.height) });
-    });
+    const measure = () => {
+      const rect = container.getBoundingClientRect();
+      const next = { width: Math.round(rect.width), height: Math.round(rect.height) };
+      setSize((current) =>
+        current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
 
+    // Measure synchronously on mount. A ResizeObserver's first delivery can land
+    // after the first paint, which would leave the canvas at its default backing
+    // store size and the graph drawn against a zero-sized viewport.
+    measure();
+
+    const observer = new ResizeObserver(measure);
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
@@ -402,6 +410,7 @@ const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
         aria-label={`Knowledge graph with ${nodes.length} nodes and ${neighborIds.size > 0 ? neighborIds.size : nodes.length} visible connections`}
         data-testid="force-graph-canvas"
         data-node-count={nodes.length}
+        data-canvas-size={`${size.width}x${size.height}`}
         data-zoom={zoom.toFixed(3)}
         data-pan-x={offset.x.toFixed(2)}
         data-pan-y={offset.y.toFixed(2)}

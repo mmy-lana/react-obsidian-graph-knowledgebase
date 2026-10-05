@@ -21,6 +21,59 @@ const sel = {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Reads painted pixels from the graph canvas so viewport framing can be
+ * asserted against the production bundle, not only in component-level checks.
+ */
+async function readPaintedPixels(page, selector, region) {
+  return page.evaluate(
+    ([sel, box]) => {
+      const canvas = document.querySelector(sel);
+      if (!canvas) return { total: -1, width: 0, height: 0 };
+
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) return { total: -2, width: 0, height: 0 };
+
+      const x = Math.max(0, Math.floor(box?.x ?? 0));
+      const y = Math.max(0, Math.floor(box?.y ?? 0));
+      const w = Math.max(1, Math.floor(box?.w ?? canvas.width));
+      const h = Math.max(1, Math.floor(box?.h ?? canvas.height));
+      const { data } = context.getImageData(x, y, w, h);
+
+      let total = 0;
+      for (let index = 3; index < data.length; index += 4) {
+        if (data[index] !== 0) total += 1;
+      }
+      return { total, width: canvas.width, height: canvas.height };
+    },
+    [selector, region ?? null],
+  );
+}
+
+/** Dispatches a wheel event on the canvas; `ctrlKey` models a trackpad pinch. */
+async function dispatchWheel(page, selector, { deltaY, deltaX = 0, ctrlKey = false }) {
+  return page.evaluate(
+    ([sel, options]) => {
+      const canvas = document.querySelector(sel);
+      if (!canvas) return false;
+      const rect = canvas.getBoundingClientRect();
+      const event = new WheelEvent('wheel', {
+        deltaY: options.deltaY,
+        deltaX: options.deltaX,
+        ctrlKey: options.ctrlKey,
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+      });
+      canvas.dispatchEvent(event);
+      return event.defaultPrevented;
+    },
+    [selector, { deltaY, deltaX, ctrlKey }],
+  );
+}
+
+
 /** Clears a controlled input the way React sees it (native setter + input event). */
 async function clearInput(page, selector) {
   await page.evaluate((sel) => {
@@ -171,6 +224,87 @@ export async function appChecks({ page, list, viewport, assert, assertEqual }) {
     assert(graphState.present, 'graph canvas mounted');
     assert(graphState.nodes > 0, 'graph rendered no nodes');
     assert(graphState.width > 0, 'canvas backing store not sized');
+    await showEditorPane();
+  });
+
+  await list.check(`[${viewport.name}] graph is framed in the viewport after refresh`, async () => {
+    await showGraphPane();
+
+    const painted = await readPaintedPixels(page, sel.graphCanvas);
+    assert(painted.total > 0, 'graph canvas painted nodes on first load');
+
+    const centre = await readPaintedPixels(page, sel.graphCanvas, {
+      x: painted.width * 0.2,
+      y: painted.height * 0.2,
+      w: painted.width * 0.6,
+      h: painted.height * 0.6,
+    });
+    assert(centre.total > 0, `nodes must be framed in the viewport centre (${centre.total} painted pixels)`);
+    assert(
+      centre.total >= painted.total * 0.5,
+      `the graph must sit centrally, not in a corner (${centre.total} of ${painted.total})`,
+    );
+
+    const zoom = await page.evaluate(
+      (selector) => Number(document.querySelector(selector)?.dataset.zoom ?? 0),
+      sel.graphCanvas,
+    );
+    assert(zoom >= 0.5 && zoom <= 1.8, `framing zoom must be within the fit clamp (${zoom})`);
+
+    await showEditorPane();
+  });
+
+  await list.check(`[${viewport.name}] pinch and wheel zoom stay smooth and anchored`, async () => {
+    await showGraphPane();
+    const read = () =>
+      page.evaluate((selector) => {
+        const canvas = document.querySelector(selector);
+        return {
+          zoom: Number(canvas?.dataset.zoom ?? 0),
+          panX: Number(canvas?.dataset.panX ?? 0),
+          panY: Number(canvas?.dataset.panY ?? 0),
+        };
+      }, sel.graphCanvas);
+
+    const start = await read();
+
+    // A single absurd pinch frame must not multiply zoom (clamped and damped).
+    const prevented = await dispatchWheel(page, sel.graphCanvas, { deltaY: -900, ctrlKey: true });
+    assertEqual(prevented, true, 'wheel handling cancels the browser scroll');
+    await sleep(120);
+
+    const afterPinch = await read();
+    assert(afterPinch.zoom > start.zoom, 'pinch-out zooms in');
+    assert(
+      afterPinch.zoom / start.zoom <= 1.07,
+      `pinch must be damped, not exponential (${start.zoom} -> ${afterPinch.zoom})`,
+    );
+
+    for (let i = 0; i < 25; i += 1) {
+      await dispatchWheel(page, sel.graphCanvas, { deltaY: -15, ctrlKey: true });
+    }
+    await sleep(150);
+    const sustained = await read();
+    assert(sustained.zoom <= 4, `pinch must respect the zoom clamp (${sustained.zoom})`);
+
+    for (let i = 0; i < 25; i += 1) {
+      await dispatchWheel(page, sel.graphCanvas, { deltaY: 15, ctrlKey: true });
+    }
+    await sleep(150);
+    const recovered = await read();
+    assert(recovered.zoom < sustained.zoom, 'pinch-in reduces zoom again');
+
+    // Discrete mouse wheel steps zoom and re-anchor around the pointer.
+    const beforeWheel = await read();
+    await dispatchWheel(page, sel.graphCanvas, { deltaY: -120 });
+    await sleep(150);
+    const afterWheel = await read();
+    assert(afterWheel.zoom > beforeWheel.zoom, 'mouse wheel steps zoom in');
+    assert(
+      afterWheel.panX !== beforeWheel.panX || afterWheel.panY !== beforeWheel.panY,
+      'wheel zoom must re-anchor the camera around the pointer',
+    );
+
     await showEditorPane();
   });
 

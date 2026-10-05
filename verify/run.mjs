@@ -85,6 +85,9 @@ async function runAppSuite(page, origin, spec, list) {
     });
     await page.goto(origin);
     await page.waitForSelector('#root > *', { timeout: 15_000 });
+    if (process.env.KB_DEBUG) {
+      console.log('DEBUG logs', viewport.name, JSON.stringify(page.diagnostics.errors.filter((e) => e.includes('[graph]'))));
+    }
     await page.settle();
 
     await list.check(`[${viewport.name}] boots with a rendered root`, async () => {
