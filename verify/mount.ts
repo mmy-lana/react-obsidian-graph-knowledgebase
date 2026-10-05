@@ -144,6 +144,30 @@ export async function clickTarget(target: EventTarget | null, { optional = false
   });
 }
 
+/** Runs an async operation inside `act` so live-query updates flush cleanly. */
+export async function withAct<T>(operation: () => Promise<T> | T): Promise<T> {
+  let result: T | undefined;
+  await act(async () => {
+    result = await operation();
+  });
+  return result as T;
+}
+
+/** Polls until `predicate` returns true (used to await reactive queries). */
+export async function waitFor(
+  predicate: () => boolean,
+  { timeout = 5_000, label = 'condition' }: { timeout?: number; label?: string } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
 /**
  * Advances timers, animation frames and pending promises inside `act` so
  * component state updates triggered by `setTimeout`/`requestAnimationFrame`

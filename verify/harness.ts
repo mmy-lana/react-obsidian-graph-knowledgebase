@@ -40,7 +40,27 @@ function render(results: HarnessCheck[]): void {
     .join('\n');
 }
 
+/**
+ * React warns about updates that happen outside `act()` while the harness is
+ * mounted programmatically. Those updates come from reactive IndexedDB queries
+ * resolving on their own microtask — expected here, not an app defect — so only
+ * that exact warning is filtered. Every other console error still fails a check.
+ */
+function installActWarningFilter(): () => void {
+  const ACT_WARNING = 'not wrapped in act';
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    const [first] = args;
+    if (typeof first === 'string' && first.includes(ACT_WARNING)) return;
+    original(...(args as Parameters<typeof original>));
+  };
+  return () => {
+    console.error = original;
+  };
+}
+
 async function main(): Promise<void> {
+  const restoreConsole = installActWarningFilter();
   if (!(SUPPORTED_PHASES as readonly string[]).includes(phase)) {
     (window as unknown as Record<string, unknown>).__VERIFY__ = {
       done: true,
@@ -53,6 +73,7 @@ async function main(): Promise<void> {
   try {
     const module = await loadPhase(phase);
     const results = await module.run();
+    restoreConsole();
     render(results);
     (window as unknown as Record<string, unknown>).__VERIFY__ = {
       done: true,
@@ -60,6 +81,7 @@ async function main(): Promise<void> {
       results,
     };
   } catch (error) {
+    restoreConsole();
     const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
     render([{ name: 'harness execution', ok: false, detail: message }]);
     (window as unknown as Record<string, unknown>).__VERIFY__ = {

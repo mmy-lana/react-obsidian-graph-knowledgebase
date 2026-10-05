@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="icon" href="data:,"/><link rel="stylesheet" href="/src/globals.css"/></head>
+<body><div id="mount"></div>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { MarkdownEditor } from '/src/components/domain/editor/MarkdownEditor.tsx';
+import { useNotes } from '/src/hooks/useNotes.ts';
+import { getDb } from '/src/services/db/schema.ts';
+import { seedDatabaseIfEmpty } from '/src/services/db/seed.ts';
+
+const db = getDb();
+await db.delete(); await db.open(); await seedDatabaseIfEmpty();
+
+function Harness() {
+  const notes = useNotes();
+  if (notes.notes.length === 0) return React.createElement('p', null, 'loading');
+  return React.createElement(MarkdownEditor, {
+    note: notes.notes[0],
+    notes: notes.notes,
+    mode: 'source',
+    onChangeContent: (content) => { window.__last = content; },
+  });
+}
+createRoot(document.getElementById('mount')).render(React.createElement(Harness));
+window.__ready = true;
+</script></body></html>

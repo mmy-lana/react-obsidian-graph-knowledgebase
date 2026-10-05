@@ -4,15 +4,25 @@ export interface HarnessCheck {
   detail: string;
 }
 
-export function check(name: string, fn: () => void | Promise<void>): Promise<HarnessCheck> {
-  return Promise.resolve()
-    .then(fn)
-    .then((): HarnessCheck => ({ name, ok: true, detail: '' }))
-    .catch((error: unknown): HarnessCheck => ({
+/**
+ * Runs one assertion group. The callback is *not* wrapped in `act` (mounting
+ * nested inside an outer `act` defers rendering); suites use `mount`, `flush`,
+ * `withAct` and `waitFor` where React updates need an explicit flush.
+ */
+export async function check(
+  name: string,
+  fn: () => void | Promise<void>,
+): Promise<HarnessCheck> {
+  try {
+    await fn();
+    return { name, ok: true, detail: '' };
+  } catch (error) {
+    return {
       name,
       ok: false,
       detail: error instanceof Error ? error.message : String(error),
-    }));
+    };
+  }
 }
 
 export function expect(condition: boolean, message = 'assertion failed'): asserts condition {

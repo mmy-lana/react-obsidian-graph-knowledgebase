@@ -91,6 +91,7 @@ export function TabNavigation<T extends string>({
             role="tab"
             id={`${testId}-tab-${tab.id}`}
             data-tab-id={tab.id}
+            data-testid={`${testId}-tab-${tab.id}`}
             aria-selected={selected}
             aria-controls={`${testId}-panel-${tab.id}`}
             tabIndex={selected ? 0 : -1}
