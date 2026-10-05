@@ -59,6 +59,32 @@ export interface UseGraphSimulationOptions {
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
+/** Lowest and highest camera scale. */
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 4;
+
+/**
+ * Cooling floor that marks the layout as settled.
+ *
+ * Matches the engine's `alphaMin`: at or below it the engine stops ticking, so
+ * the bounding box being framed is final and will not drift afterwards.
+ */
+const SETTLED_ALPHA = 0.001;
+
+/** World point kept under the pointer when the camera zooms. */
+interface Point {
+  x: number;
+  y: number;
+}
+
+/**
+ * Camera transform, held as one value so zoom and offset always commit together.
+ */
+interface Camera {
+  zoom: number;
+  offset: Point;
+}
+
 /**
  * Owns the canvas simulation lifecycle: data building, engine ticking, pan and
  * zoom state, hit testing and node dragging.
@@ -75,13 +101,17 @@ export function useGraphSimulation({
   const simulationRef = useRef<ForceDirectedSimulation | null>(null);
   const nodesRef = useRef<GraphNode[]>([]);
   const hasAutoCenteredRef = useRef(false);
+  /** Set once the user pans or zooms, which ends settle-time auto-framing. */
+  const cameraTouchedRef = useRef(false);
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [alpha, setAlpha] = useState(1);
   const [paused, setPaused] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [camera, setCamera] = useState<Camera>({ zoom: 1, offset: { x: 0, y: 0 } });
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  // Read-only projections of the camera for callers that consume one axis only.
+  const { zoom, offset } = camera;
 
   const graph = useMemo(
     () =>
@@ -124,22 +154,32 @@ export function useGraphSimulation({
     simulationRef.current?.start();
   }, [graph]);
 
+  /**
+   * Scales the camera about a screen point, keeping that point fixed.
+   *
+   * Zoom and offset are derived together inside a single pure updater. Deriving
+   * the offset inside the zoom updater instead would apply the offset transform
+   * twice per step under StrictMode's double-invoked updaters, which slides the
+   * graph out from under the pointer.
+   */
   const zoomAt = useCallback(
     (factor: number, screenX?: number, screenY?: number) => {
-      setZoom((currentZoom) => {
-        const nextZoom = clamp(currentZoom * factor, 0.25, 4);
-        if (nextZoom === currentZoom) return currentZoom;
+      cameraTouchedRef.current = true;
+      setCamera((current) => {
+        const nextZoom = clamp(current.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+        if (nextZoom === current.zoom) return current;
 
-        const actualFactor = nextZoom / currentZoom;
+        const actualFactor = nextZoom / current.zoom;
         const focusX = screenX !== undefined ? screenX : width / 2;
         const focusY = screenY !== undefined ? screenY : height / 2;
 
-        setOffset((currentOffset) => ({
-          x: currentOffset.x * actualFactor + (focusX - width / 2) * (1 - actualFactor),
-          y: currentOffset.y * actualFactor + (focusY - height / 2) * (1 - actualFactor),
-        }));
-
-        return nextZoom;
+        return {
+          zoom: nextZoom,
+          offset: {
+            x: current.offset.x * actualFactor + (focusX - width / 2) * (1 - actualFactor),
+            y: current.offset.y * actualFactor + (focusY - height / 2) * (1 - actualFactor),
+          },
+        };
       });
     },
     [width, height],
@@ -152,12 +192,13 @@ export function useGraphSimulation({
     [zoomAt],
   );
 
-  const pan = useCallback(
-    (deltaX: number, deltaY: number) => {
-      setOffset((current) => ({ x: current.x + deltaX, y: current.y + deltaY }));
-    },
-    [],
-  );
+  const pan = useCallback((deltaX: number, deltaY: number) => {
+    cameraTouchedRef.current = true;
+    setCamera((current) => ({
+      zoom: current.zoom,
+      offset: { x: current.offset.x + deltaX, y: current.offset.y + deltaY },
+    }));
+  }, []);
 
   /**
    * Frames every laid-out node inside the canvas viewport.
@@ -175,8 +216,7 @@ export function useGraphSimulation({
       );
 
       if (positioned.length === 0 || width <= 0 || height <= 0) {
-        setZoom(1);
-        setOffset({ x: 0, y: 0 });
+        setCamera({ zoom: 1, offset: { x: 0, y: 0 } });
         return;
       }
 
@@ -206,13 +246,16 @@ export function useGraphSimulation({
       );
       const targetZoom = clamp(scale, 0.5, 1.8);
 
-      setZoom(targetZoom);
-      setOffset({ x: -centerX * targetZoom, y: -centerY * targetZoom });
+      setCamera({
+        zoom: targetZoom,
+        offset: { x: -centerX * targetZoom, y: -centerY * targetZoom },
+      });
     },
     [width, height],
   );
 
   const resetView = useCallback(() => {
+    cameraTouchedRef.current = false;
     fitToView();
     simulationRef.current?.unpinAll();
     simulationRef.current?.reheat(0.8);
@@ -222,10 +265,15 @@ export function useGraphSimulation({
     (nodeId: string) => {
       const node = simulationRef.current?.findNode(nodeId);
       if (!node || node.x == null || node.y == null) return;
-      setZoom((current) => {
-        const targetZoom = clamp(current, 0.8, 2.2);
-        setOffset({ x: -node.x! * targetZoom, y: -node.y! * targetZoom });
-        return targetZoom;
+      const worldX = node.x;
+      const worldY = node.y;
+
+      setCamera((current) => {
+        const targetZoom = clamp(current.zoom, 0.8, 2.2);
+        return {
+          zoom: targetZoom,
+          offset: { x: -worldX * targetZoom, y: -worldY * targetZoom },
+        };
       });
     },
     [],
@@ -245,6 +293,27 @@ export function useGraphSimulation({
     if (activeNoteId) centerOn(activeNoteId);
     else fitToView();
   }, [width, height, nodes.length, activeNoteId, centerOn, fitToView]);
+
+  /**
+   * Keeps the camera framed while physics is still hot, then hands it back.
+   *
+   * The layout does not exist at mount: nodes start near their seed positions
+   * and the force engine needs several hundred ticks to settle. A single fit
+   * therefore frames an arbitrary initial bounding box and the real cluster
+   * immediately drifts out of it. Tracking the settled extent each tick keeps
+   * the graph centred for the whole settle, and stopping at the cooling floor
+   * leaves a stable final framing.
+   *
+   * The user takes precedence: any pan or zoom ends auto-framing so the camera
+   * never yanks away from an intentional gesture.
+   */
+  useEffect(() => {
+    if (width <= 0 || height <= 0 || nodes.length === 0) return;
+    if (cameraTouchedRef.current || alpha <= SETTLED_ALPHA) return;
+
+    if (activeNoteId) centerOn(activeNoteId);
+    else fitToView();
+  }, [alpha, nodes.length, width, height, activeNoteId, centerOn, fitToView]);
 
   const dragNode = useCallback((nodeId: string, x: number, y: number, pinned: boolean) => {
     simulationRef.current?.setNodePosition(nodeId, x, y, pinned);
