@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Knowledge Base verification harness</title>
+    <style>
+      body {
+        background: #090d16;
+        color: #f1f5f9;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 0;
+        padding: 16px;
+      }
+      h1 { font-size: 14px; color: #38bdf8; }
+      pre { font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+      .pass { color: #4ade80; }
+      .fail { color: #fb7185; }
+    </style>
+  </head>
+  <body>
+    <h1>Knowledge Base — headless verification harness</h1>
+    <pre id="harness-output">booting…</pre>
+    <script type="module" src="./harness.ts"></script>
+  </body>
+</html>
