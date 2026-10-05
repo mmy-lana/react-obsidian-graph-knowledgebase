@@ -49,6 +49,74 @@ const FORMAT_RULES: Record<EditorFormatAction, FormatRule> = {
   quote: { prefix: '> ' },
 };
 
+/** Typography copied onto the caret mirror so it wraps exactly like the textarea. */
+const CARET_MIRROR_PROPERTIES = [
+  'fontFamily',
+  'fontSize',
+  'fontWeight',
+  'fontStyle',
+  'letterSpacing',
+  'lineHeight',
+  'textTransform',
+  'wordSpacing',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'borderTopWidth',
+  'borderRightWidth',
+  'borderBottomWidth',
+  'borderLeftWidth',
+  'boxSizing',
+  'tabSize',
+] as const;
+
+let caretMirror: HTMLDivElement | null = null;
+
+/**
+ * Returns the shared offscreen element used to measure caret coordinates.
+ *
+ * The element is created once per document and re-styled whenever the target
+ * textarea changes (font size, zoom, responsive width). Callers must leave the
+ * mirror empty when they are done measuring.
+ */
+function getCaretMirror(textarea: HTMLTextAreaElement): HTMLDivElement {
+  const doc = textarea.ownerDocument;
+
+  if (!caretMirror || caretMirror.ownerDocument !== doc) {
+    caretMirror?.remove();
+    caretMirror = doc.createElement('div');
+    caretMirror.setAttribute('aria-hidden', 'true');
+    caretMirror.dataset.caretMirror = 'true';
+  }
+
+  const style = doc.defaultView!.getComputedStyle(textarea);
+  caretMirror.style.position = 'absolute';
+  caretMirror.style.visibility = 'hidden';
+  caretMirror.style.pointerEvents = 'none';
+  caretMirror.style.top = '0';
+  caretMirror.style.left = '-9999px';
+  caretMirror.style.whiteSpace = 'pre-wrap';
+  caretMirror.style.wordWrap = 'break-word';
+  caretMirror.style.width = `${textarea.clientWidth}px`;
+
+  for (const property of CARET_MIRROR_PROPERTIES) {
+    caretMirror.style[property] = style[property];
+  }
+
+  if (caretMirror.parentNode !== doc.body) {
+    doc.body.appendChild(caretMirror);
+  }
+
+  return caretMirror;
+}
+
+/** Drops the shared caret mirror (called when the editor unmounts). */
+function releaseCaretMirror(): void {
+  caretMirror?.remove();
+  caretMirror = null;
+}
+
 /**
  * Markdown source editor with line numbers, list auto-continuation,
  * auto-indent, frontmatter awareness and `[[` wikilink autocomplete.
@@ -71,6 +139,10 @@ export function MarkdownEditor({
   const [isTouch] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(pointer: coarse)').matches : false,
   );
+
+  // The caret mirror is shared across mounts, so it is released when the last
+  // editor instance goes away rather than lingering in the document.
+  useEffect(() => releaseCaretMirror, []);
 
   const autocomplete = useWikilinkAutoComplete(notes);
   const { close: closeAutocomplete } = autocomplete;
@@ -118,52 +190,40 @@ export function MarkdownEditor({
     gutter.scrollTop = textarea.scrollTop;
   }, []);
 
-  /** Maps a character offset to viewport coordinates for the suggestion popup. */
-  const coordinateAt = useCallback((offset: number): { top: number; left: number } => {
-    const textarea = textareaRef.current;
-    if (!textarea) return { top: 0, left: 0 };
+  /**
+   * Maps a character offset to viewport coordinates for the suggestion popup.
+   *
+   * Touch devices render the popup as a bottom drawer and never consume these
+   * coordinates, so measurement is skipped there. On pointer devices a single
+   * cached mirror element is reused: creating, appending and removing a node per
+   * keystroke forces a synchronous reflow and shows up as typing latency.
+   */
+  const coordinateAt = useCallback(
+    (offset: number): { top: number; left: number } => {
+      const textarea = textareaRef.current;
+      if (!textarea || isTouch) return { top: 0, left: 0 };
 
-    const before = textarea.value.slice(0, offset);
-    const lineStart = before.lastIndexOf('\n') + 1;
+      const before = textarea.value.slice(0, offset);
+      const lineStart = before.lastIndexOf('\n') + 1;
 
-    const mirror = document.createElement('div');
-    const style = window.getComputedStyle(textarea);
-    const properties = [
-      'fontFamily',
-      'fontSize',
-      'fontWeight',
-      'letterSpacing',
-      'lineHeight',
-      'paddingTop',
-      'paddingLeft',
-      'borderTopWidth',
-      'borderLeftWidth',
-      'boxSizing',
-      'tabSize',
-    ] as const;
+      const mirror = getCaretMirror(textarea);
+      mirror.textContent = textarea.value.slice(0, lineStart);
 
-    mirror.style.position = 'absolute';
-    mirror.style.visibility = 'hidden';
-    mirror.style.whiteSpace = 'pre-wrap';
-    mirror.style.wordWrap = 'break-word';
-    mirror.style.width = `${textarea.clientWidth}px`;
-    for (const property of properties) mirror.style[property] = style[property];
+      const marker = mirror.ownerDocument.createElement('span');
+      marker.textContent = textarea.value.slice(lineStart, offset) || '.';
+      mirror.appendChild(marker);
 
-    mirror.textContent = textarea.value.slice(0, lineStart);
-    const marker = document.createElement('span');
-    marker.textContent = textarea.value.slice(lineStart, offset) || '.';
-    mirror.appendChild(marker);
+      const markerRect = marker.getBoundingClientRect();
+      const textareaRect = textarea.getBoundingClientRect();
+      mirror.textContent = '';
 
-    document.body.appendChild(mirror);
-    const markerRect = marker.getBoundingClientRect();
-    const textareaRect = textarea.getBoundingClientRect();
-    document.body.removeChild(mirror);
-
-    return {
-      top: textareaRect.top + markerRect.top - textarea.scrollTop,
-      left: textareaRect.left + markerRect.left - textarea.scrollLeft + 4,
-    };
-  }, []);
+      return {
+        top: textareaRect.top + markerRect.top - textarea.scrollTop,
+        left: textareaRect.left + markerRect.left - textarea.scrollLeft + 4,
+      };
+    },
+    [isTouch],
+  );
 
   const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;

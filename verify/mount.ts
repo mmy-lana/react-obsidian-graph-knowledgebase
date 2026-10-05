@@ -54,6 +54,27 @@ export async function mount(element: React.ReactElement): Promise<Mounted> {
   };
 }
 
+/**
+ * Dispatches a cancellable wheel event inside `act` and reports whether the
+ * handler cancelled it. A passive listener cannot prevent the default action, so
+ * this distinguishes a native non-passive binding from a passive one.
+ */
+export async function dispatchWheel(
+  element: Element | null,
+  { deltaY = -120 }: { deltaY?: number } = {},
+): Promise<boolean> {
+  if (!element) throw new Error('wheel target does not exist');
+
+  let defaultPrevented = false;
+  await act(async () => {
+    const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true });
+    element.dispatchEvent(event);
+    defaultPrevented = event.defaultPrevented;
+  });
+
+  return defaultPrevented;
+}
+
 /** Dispatch a click through React's synthetic event system. */
 export async function click(element: Element | null): Promise<void> {
   if (!element) throw new Error('click target does not exist');

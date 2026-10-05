@@ -43,6 +43,18 @@ const FOCUSABLE_SELECTOR = [
 ].join(',');
 
 /**
+ * Number of dialogs currently locking page scroll.
+ *
+ * Modals stack (a prompt opened from the command palette, a confirm opened from
+ * a drawer), so the lock is reference counted: the body is only unlocked once
+ * the last dialog closes, otherwise closing a child would restore the previous
+ * dialog's `overflow: hidden` and freeze the page permanently.
+ */
+let activeModalCount = 0;
+let lockedOverflow = '';
+let lockedPaddingRight = '';
+
+/**
  * Portal-rendered dialog with focus management, Escape handling, scroll lock,
  * and a mobile bottom-sheet presentation.
  *
@@ -113,10 +125,16 @@ export function Modal({
 
     document.addEventListener('keydown', onKeyDown, true);
 
-    const { overflow, paddingRight } = document.body.style;
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
-    document.body.style.overflow = 'hidden';
-    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    if (activeModalCount === 0) {
+      lockedOverflow = document.body.style.overflow;
+      lockedPaddingRight = document.body.style.paddingRight;
+
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+      document.body.style.overflow = 'hidden';
+      if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    activeModalCount += 1;
 
     const focusTimer = window.setTimeout(() => {
       const panel = panelRef.current;
@@ -131,8 +149,13 @@ export function Modal({
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
       window.clearTimeout(focusTimer);
-      document.body.style.overflow = overflow;
-      document.body.style.paddingRight = paddingRight;
+
+      activeModalCount = Math.max(0, activeModalCount - 1);
+      if (activeModalCount === 0) {
+        document.body.style.overflow = lockedOverflow;
+        document.body.style.paddingRight = lockedPaddingRight;
+      }
+
       previouslyFocused.current?.focus?.();
     };
   }, [open, disableEscape, requestClose]);

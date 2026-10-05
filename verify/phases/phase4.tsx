@@ -7,6 +7,7 @@ import { check, expect, expectEqual, type HarnessCheck } from '../support';
 import {
   blurElement,
   click,
+  dispatchWheel,
   clickTarget,
   fireKeyDown,
   flush,
@@ -822,6 +823,56 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
     }),
   );
 
+  results.push(
+    await check('PERF-01: caret measurement reuses one mirror element', async () => {
+      const view = await mount(<EditorHarness initialContent="" />);
+      const textarea = view.query<HTMLTextAreaElement>('[data-testid="markdown-editor-textarea"]')!;
+
+      const countMirrors = () => document.querySelectorAll('[data-caret-mirror="true"]').length;
+
+      await setNativeValue(textarea, 'a [[Gra');
+      await flush();
+      const afterFirst = countMirrors();
+      expect(afterFirst <= 1, `at most one caret mirror may exist, found ${afterFirst}`);
+
+      for (const value of ['b [[Grap', 'c [[Graph', 'd [[Graph T']) {
+        await setNativeValue(textarea, value);
+        await flush();
+      }
+
+      expectEqual(countMirrors(), afterFirst, 'the mirror is reused across keystrokes');
+      expect(
+        (document.querySelector('[data-caret-mirror="true"]')?.textContent ?? '').length === 0,
+        'mirror is emptied after measuring',
+      );
+
+      await view.unmount();
+      await flush();
+      expectEqual(countMirrors(), 0, 'mirror released when the editor unmounts');
+    }),
+  );
+
+  results.push(
+    await check('UI-02: canvas wheel zoom is bound as a non-passive native listener', async () => {
+      const view = await mount(<GraphHarness />);
+      await flush(120);
+
+      const canvas = view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!;
+      const zoomBefore = Number(canvas.dataset.zoom);
+
+      // A non-passive listener can cancel the event; a passive one cannot.
+      const defaultPrevented = await dispatchWheel(canvas);
+
+      expectEqual(defaultPrevented, true, 'wheel event must be cancelable by our handler');
+      await flush(60);
+
+      const zoomAfter = Number(view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!.dataset.zoom);
+      expect(zoomAfter > zoomBefore, `wheel-up should zoom in (${zoomBefore} -> ${zoomAfter})`);
+
+      await view.unmount();
+    }),
+  );
+
   return results;
 }
 
@@ -851,6 +902,7 @@ interface EditorApi {
   notes: Note[];
   pendingContent: string;
 }
+
 
 const editorApi: EditorApi = { notes: [], pendingContent: '' };
 

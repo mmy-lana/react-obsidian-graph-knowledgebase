@@ -91,6 +91,12 @@ export function ForceGraphCanvas({
     nearestNode,
   } = simulation;
 
+  // Stable handle so the native wheel listener never needs re-binding.
+  const zoomByRef = useRef(zoomBy);
+  useEffect(() => {
+    zoomByRef.current = zoomBy;
+  }, [zoomBy]);
+
   // Pointer gesture bookkeeping.
   const gestureRef = useRef<{
     mode: 'idle' | 'pan' | 'drag' | 'pinch';
@@ -307,12 +313,26 @@ export function ForceGraphCanvas({
     }
   };
 
-  const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
-    zoomBy(event.deltaY < 0 ? 1.12 : 0.89);
-  };
+  /**
+ * Wheel zooming is bound natively with `{ passive: false }`.
+ *
+ * React's synthetic `onWheel` is registered passively by the browser, so calling
+ * `preventDefault()` there is ignored and logs a console warning.
+ */
+useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-  const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      zoomByRef.current(event.deltaY < 0 ? 1.12 : 0.89);
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
+const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
     if (event.touches.length !== 2) return;
     event.preventDefault();
 
@@ -348,7 +368,6 @@ export function ForceGraphCanvas({
           gestureRef.current.mode = 'idle';
           setHoveredNode(null);
         }}
-        onWheel={handleWheel}
         onTouchMove={handleTouchMove}
         onTouchEnd={() => {
           gestureRef.current.pinchDistance = 0;

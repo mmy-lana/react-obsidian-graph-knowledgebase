@@ -514,6 +514,49 @@ export async function runPhase2(): Promise<HarnessCheck[]> {
     }),
   );
 
+  results.push(
+    await check('UI-01: stacked modals release the scroll lock exactly once', async () => {
+      // A dialog opened from another dialog must not restore the parent's lock.
+      const view = await mount(<div data-testid="outer-shell" />);
+      expectEqual(document.body.style.overflow, '', 'page starts unlocked');
+
+      await view.update(<Modal open title="Outer" onClose={() => undefined}>outer body</Modal>);
+      await tick();
+      expectEqual(document.body.style.overflow, 'hidden', 'outer modal locks the page');
+
+      await view.update(
+        <div>
+          <Modal open title="Outer" onClose={() => undefined}>
+            outer body
+          </Modal>
+          <Modal open title="Inner" onClose={() => undefined}>
+            inner body
+          </Modal>
+        </div>,
+      );
+      await tick();
+      expectEqual(document.body.style.overflow, 'hidden', 'nested modal keeps the lock');
+
+      await view.update(
+        <Modal open title="Outer" onClose={() => undefined}>
+          outer body
+        </Modal>,
+      );
+      await tick();
+      expectEqual(
+        document.body.style.overflow,
+        'hidden',
+        'closing the inner modal must NOT unlock the page',
+      );
+
+      await view.update(<div />);
+      await tick();
+      expectEqual(document.body.style.overflow, '', 'last modal closed unlocks the page');
+
+      await view.unmount();
+    }),
+  );
+
   return results;
 }
 
