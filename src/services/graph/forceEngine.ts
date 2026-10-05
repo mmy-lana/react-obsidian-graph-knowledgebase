@@ -42,8 +42,6 @@ export class ForceDirectedSimulation {
   private nodes: GraphNode[] = [];
   private edges: ResolvedGraphEdge[] = [];
   private settings: GraphPhysicsSettings;
-  private width: number;
-  private height: number;
   private alpha = 1;
   private alphaMin = 0.001;
   private isRunning = false;
@@ -51,24 +49,20 @@ export class ForceDirectedSimulation {
   private onTickCallback: ((nodes: GraphNode[]) => void) | null = null;
   private destroyed = false;
 
-  constructor(width: number, height: number, settings: GraphPhysicsSettings) {
-    this.width = width;
-    this.height = height;
+  constructor(_width: number, _height: number, settings: GraphPhysicsSettings) {
     this.settings = settings;
   }
 
   public setData(rawNodes: GraphNode[], rawEdges: RawGraphEdge[]): void {
     const previous = new Map(this.nodes.map((node) => [node.id, node]));
     const nodeMap = new Map<string, GraphNode>();
-    const width = this.width || 1;
-    const height = this.height || 1;
 
     this.nodes = rawNodes.map((original) => {
       const cached = previous.get(original.id);
       const cloned: GraphNode = {
         ...original,
-        x: original.x ?? cached?.x ?? width / 2 + (Math.random() - 0.5) * (width * 0.4),
-        y: original.y ?? cached?.y ?? height / 2 + (Math.random() - 0.5) * (height * 0.4),
+        x: original.x ?? cached?.x ?? (Math.random() - 0.5) * 160,
+        y: original.y ?? cached?.y ?? (Math.random() - 0.5) * 160,
         vx: original.vx ?? cached?.vx ?? 0,
         vy: original.vy ?? cached?.vy ?? 0,
         fx: original.fx ?? null,
@@ -90,9 +84,8 @@ export class ForceDirectedSimulation {
     this.alpha = 1;
   }
 
-  public setDimensions(width: number, height: number): void {
-    this.width = width;
-    this.height = height;
+  public setDimensions(_width: number, _height: number): void {
+    // Maintained for API compatibility; simulation coordinates are origin-centered.
   }
 
   public setSettings(settings: GraphPhysicsSettings): void {
@@ -214,12 +207,12 @@ export class ForceDirectedSimulation {
     if (this.alpha <= this.alphaMin || this.nodes.length === 0) return;
 
     const nodes = this.nodes;
-    const centerX = this.width / 2;
-    const centerY = this.height / 2;
+    const centerX = 0;
+    const centerY = 0;
     const { chargeStrength, linkDistance, linkStrength, collisionRadius, centerStrength, damping } =
       this.settings;
 
-    // 1. Gravity toward the centre.
+    // 1. Gravity toward the origin.
     for (const node of nodes) {
       if (node.fx != null || node.fy != null) continue;
       node.vx = (node.vx ?? 0) + (centerX - (node.x ?? 0)) * centerStrength * this.alpha;

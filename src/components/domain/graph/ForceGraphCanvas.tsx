@@ -80,6 +80,7 @@ export function ForceGraphCanvas({
     neighborIds,
     paused,
     zoomBy,
+    zoomAt,
     pan,
     resetView,
     centerOn,
@@ -91,11 +92,13 @@ export function ForceGraphCanvas({
     nearestNode,
   } = simulation;
 
-  // Stable handle so the native wheel listener never needs re-binding.
-  const zoomByRef = useRef(zoomBy);
+  const zoomAtRef = useRef(zoomAt);
+  const panRef = useRef(pan);
+
   useEffect(() => {
-    zoomByRef.current = zoomBy;
-  }, [zoomBy]);
+    zoomAtRef.current = zoomAt;
+    panRef.current = pan;
+  }, [zoomAt, pan]);
 
   // Pointer gesture bookkeeping.
   const gestureRef = useRef<{
@@ -314,18 +317,39 @@ export function ForceGraphCanvas({
   };
 
   /**
- * Wheel zooming is bound natively with `{ passive: false }`.
- *
- * React's synthetic `onWheel` is registered passively by the browser, so calling
- * `preventDefault()` there is ignored and logs a console warning.
- */
-useEffect(() => {
+   * Native non-passive wheel listener supporting:
+   * 1. macOS trackpad pinch gestures (WheelEvent with ctrlKey: true) via smooth continuous scaling.
+   * 2. Two-finger trackpad panning (deltaX != 0 or small fractional deltaY) without zooming.
+   * 3. Discrete mouse wheel scrolling with focal zoom anchored to the cursor position.
+   */
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      zoomByRef.current(event.deltaY < 0 ? 1.12 : 0.89);
+
+      const rect = canvas.getBoundingClientRect();
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
+
+      if (event.ctrlKey) {
+        // Continuous smooth zoom for trackpad pinch gestures
+        const factor = Math.exp(-event.deltaY * 0.01);
+        zoomAtRef.current(factor, pointerX, pointerY);
+        return;
+      }
+
+      // Discrete mouse wheel vs trackpad two-finger pan discrimination
+      const isMouseWheel =
+        event.deltaMode !== 0 || (event.deltaX === 0 && Math.abs(event.deltaY) >= 40);
+
+      if (isMouseWheel) {
+        const factor = Math.pow(0.998, event.deltaY);
+        zoomAtRef.current(factor, pointerX, pointerY);
+      } else {
+        panRef.current(-event.deltaX, -event.deltaY);
+      }
     };
 
     canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -476,7 +500,7 @@ function NodeTooltip({
 
   return (
     <div
-      className="pointer-events-none absolute z-10 max-w-[14rem] -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-md border border-border bg-elevated px-2 py-1 text-[11px] text-text-main shadow-lg"
+      className="pointer-events-none absolute z-10 max-w-56 -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-md border border-border bg-elevated px-2 py-1 text-[11px] text-text-main shadow-lg"
       style={{ left: position.x, top: position.y }}
       data-testid="graph-node-tooltip"
       role="status"

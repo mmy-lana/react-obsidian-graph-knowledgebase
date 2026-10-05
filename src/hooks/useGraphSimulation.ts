@@ -27,6 +27,7 @@ export interface GraphSimulationState {
   paused: boolean;
 
   zoomBy: (factor: number) => void;
+  zoomAt: (factor: number, screenX?: number, screenY?: number) => void;
   resetView: () => void;
   pan: (deltaX: number, deltaY: number) => void;
   centerOn: (nodeId: string) => void;
@@ -117,11 +118,32 @@ export function useGraphSimulation({
     simulationRef.current?.start();
   }, [graph]);
 
+  const zoomAt = useCallback(
+    (factor: number, screenX?: number, screenY?: number) => {
+      setZoom((currentZoom) => {
+        const nextZoom = clamp(currentZoom * factor, 0.25, 4);
+        if (nextZoom === currentZoom) return currentZoom;
+
+        const actualFactor = nextZoom / currentZoom;
+        const focusX = screenX !== undefined ? screenX : width / 2;
+        const focusY = screenY !== undefined ? screenY : height / 2;
+
+        setOffset((currentOffset) => ({
+          x: currentOffset.x * actualFactor + (focusX - width / 2) * (1 - actualFactor),
+          y: currentOffset.y * actualFactor + (focusY - height / 2) * (1 - actualFactor),
+        }));
+
+        return nextZoom;
+      });
+    },
+    [width, height],
+  );
+
   const zoomBy = useCallback(
     (factor: number) => {
-      setZoom((current) => clamp(current * factor, 0.25, 4));
+      zoomAt(factor);
     },
-    [],
+    [zoomAt],
   );
 
   const pan = useCallback(
@@ -138,12 +160,18 @@ export function useGraphSimulation({
     simulationRef.current?.reheat(0.8);
   }, []);
 
-  const centerOn = useCallback((nodeId: string) => {
-    const node = simulationRef.current?.findNode(nodeId);
-    if (!node || node.x == null || node.y == null) return;
-    setZoom((current) => clamp(current, 0.8, 2.2));
-    setOffset({ x: -node.x, y: -node.y });
-  }, []);
+  const centerOn = useCallback(
+    (nodeId: string) => {
+      const node = simulationRef.current?.findNode(nodeId);
+      if (!node || node.x == null || node.y == null) return;
+      setZoom((current) => {
+        const targetZoom = clamp(current, 0.8, 2.2);
+        setOffset({ x: -node.x! * targetZoom, y: -node.y! * targetZoom });
+        return targetZoom;
+      });
+    },
+    [],
+  );
 
   const dragNode = useCallback((nodeId: string, x: number, y: number, pinned: boolean) => {
     simulationRef.current?.setNodePosition(nodeId, x, y, pinned);
@@ -219,6 +247,7 @@ export function useGraphSimulation({
     offset,
     paused,
     zoomBy,
+    zoomAt,
     resetView,
     pan,
     centerOn,
