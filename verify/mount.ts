@@ -107,19 +107,38 @@ export async function focusElement(element: Element | null): Promise<void> {
   });
 }
 
+/** Sets a controlled input value through the native setter, inside `act`. */
+export async function setInputValue(input: HTMLInputElement, value: string): Promise<void> {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (!setter) throw new Error('native value setter unavailable');
+  await act(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 /**
  * Dispatches a bubbling keydown inside `act`, for handlers registered on
  * `document`/`window` (Escape handling in Modal and DropdownMenu).
  */
-export async function fireKeyDown(target: EventTarget, key: string): Promise<void> {
+export async function fireKeyDown(
+  target: EventTarget,
+  key: string,
+  init: KeyboardEventInit = {},
+): Promise<void> {
   await act(async () => {
-    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }),
+    );
   });
 }
 
 /** Dispatches a click on an arbitrary (non-React-rendered) node inside `act`. */
-export async function clickTarget(target: EventTarget | null): Promise<void> {
-  if (!target) throw new Error('click target does not exist');
+export async function clickTarget(target: EventTarget | null, { optional = false } = {}): Promise<void> {
+  if (!target) {
+    if (optional) return;
+    throw new Error('click target does not exist');
+  }
   await act(async () => {
     (target as Element).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });

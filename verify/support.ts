@@ -15,7 +15,7 @@ export function check(name: string, fn: () => void | Promise<void>): Promise<Har
     }));
 }
 
-export function expect(condition: boolean, message: string): asserts condition {
+export function expect(condition: boolean, message = 'assertion failed'): asserts condition {
   if (!condition) throw new Error(message);
 }
 

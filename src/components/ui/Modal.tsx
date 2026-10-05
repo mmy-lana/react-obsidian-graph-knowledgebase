@@ -20,6 +20,8 @@ export interface ModalProps {
   showCloseButton?: boolean;
   /** Disables the Escape key handler (for critical confirmations). */
   disableEscape?: boolean;
+  /** Convenience hook used by end-to-end checks; sets `data-testid`. */
+  testId?: string;
   className?: string;
 }
 
@@ -59,6 +61,7 @@ export function Modal({
   closeOnBackdrop = true,
   showCloseButton = true,
   disableEscape = false,
+  testId,
   className = '',
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -161,7 +164,8 @@ export function Modal({
         aria-labelledby={title ? titleId : undefined}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
-        data-testid="modal-panel"
+        data-modal-panel="true"
+        data-testid={testId ?? 'modal-panel'}
         className={[
           'relative z-10 flex w-full flex-col overflow-hidden border border-border bg-surface text-text-main',
           'shadow-2xl shadow-black/60 outline-none',

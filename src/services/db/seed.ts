@@ -118,6 +118,7 @@ interface SeedNoteDefinition {
   folderId: string | null;
   isPinned: boolean;
   aliases: string[];
+  tags: string[];
   body: string;
 }
 
@@ -128,6 +129,7 @@ const SEED_NOTES: SeedNoteDefinition[] = [
     folderId: null,
     isPinned: true,
     aliases: ['Start Here', 'Home'],
+    tags: ['onboarding', 'welcome'],
     body: NOTE_1_BODY,
   },
   {
@@ -136,6 +138,7 @@ const SEED_NOTES: SeedNoteDefinition[] = [
     folderId: 'seed-folder-1',
     isPinned: false,
     aliases: ['Graph Theory'],
+    tags: ['graph', 'theory'],
     body: NOTE_2_BODY,
   },
   {
@@ -144,6 +147,7 @@ const SEED_NOTES: SeedNoteDefinition[] = [
     folderId: 'seed-folder-2',
     isPinned: false,
     aliases: ['Markdown Cheatsheet'],
+    tags: ['reference', 'markdown'],
     body: NOTE_3_BODY,
   },
   {
@@ -152,6 +156,7 @@ const SEED_NOTES: SeedNoteDefinition[] = [
     folderId: 'seed-folder-1',
     isPinned: false,
     aliases: ['Zettelkasten'],
+    tags: ['pkm', 'architecture'],
     body: NOTE_4_BODY,
   },
 ];
@@ -168,7 +173,7 @@ const buildSeedNotes = (): Note[] =>
     frontmatter: {
       title: definition.title,
       aliases: definition.aliases,
-      tags: [`/seed`],
+      tags: definition.tags,
       created: new Date(SEED_TIMESTAMP).toISOString().slice(0, 10),
       updated: new Date(SEED_TIMESTAMP).toISOString().slice(0, 10),
     },

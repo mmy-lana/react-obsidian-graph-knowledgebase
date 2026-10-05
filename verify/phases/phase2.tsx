@@ -220,9 +220,9 @@ export async function runPhase2(): Promise<HarnessCheck[]> {
         </Modal>,
       );
 
-      const panel = document.querySelector('[data-testid="modal-panel"]');
+      const panel = document.querySelector('[data-modal-panel]');
       expect(panel !== null, 'modal rendered in a portal');
-      expect(view.container.querySelector('[data-testid="modal-panel"]') === null, 'panel is outside the component tree container');
+      expect(view.container.querySelector('[data-modal-panel]') === null, 'panel is outside the component tree container');
       expectEqual(panel?.getAttribute('role'), 'dialog', 'dialog role');
       expectEqual(panel?.getAttribute('aria-modal'), 'true', 'aria-modal set');
 
