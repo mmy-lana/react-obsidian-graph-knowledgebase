@@ -386,6 +386,27 @@ export class Page {
       buttons: 0,
       clickCount: 1,
     });
+
+    // Portalled surfaces (modals, menus) can re-render between measuring and
+    // dispatching, which silently turns the click into a no-op. Verify the
+    // point really landed on the target and fall back to a DOM click if not.
+    const landed = await this.evaluate(
+      (sel, px, py) => {
+        const element = document.querySelector(sel);
+        const hit = document.elementFromPoint(px, py);
+        return Boolean(element && (hit === element || element.contains(hit)));
+      },
+      selector,
+      x,
+      y,
+    );
+
+    if (!landed) {
+      await this.evaluate((sel) => {
+        document.querySelector(sel)?.click();
+      }, selector);
+    }
+
     return true;
   }
 
@@ -417,7 +438,27 @@ export class Page {
     }, selector);
   }
 
-  async type(text) {
+  /**
+   * `type(text)` types into whatever is focused; `type(selector, text)` focuses
+   * that element first. Focusing through the DOM (instead of a synthetic click)
+   * keeps typing reliable under touch emulation, where mouse clicks do not
+   * always move focus the way a real tap does.
+   */
+  async type(selectorOrText, maybeText) {
+    let text = selectorOrText;
+
+    if (maybeText !== undefined) {
+      const focused = await this.evaluate((selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return false;
+        element.focus();
+        return document.activeElement === element;
+      }, selectorOrText);
+
+      if (!focused) throw new Error(`type target could not be focused: ${selectorOrText}`);
+      text = maybeText;
+    }
+
     await this.send('Input.insertText', { text });
   }
 

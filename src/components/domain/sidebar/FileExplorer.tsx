@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pin, RotateCcw } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import { DropdownMenu } from '../../ui/DropdownMenu';
@@ -62,8 +62,17 @@ export function FileExplorer({
   className = '',
 }: FileExplorerProps) {
   const [tab, setTab] = useState<'files' | 'tags'>('files');
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set(folders.map((f) => f.id)));
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
+  const bootstrappedRef = useRef(false);
+
+  // The first render happens before the reactive query resolves, so folders are
+  // expanded as soon as they actually arrive instead of staying collapsed.
+  useEffect(() => {
+    if (bootstrappedRef.current || folders.length === 0) return;
+    bootstrappedRef.current = true;
+    setExpandedIds(new Set(folders.map((folder) => folder.id)));
+  }, [folders]);
 
   const toggleFolder = (id: string) => {
     setExpandedIds((current) => {

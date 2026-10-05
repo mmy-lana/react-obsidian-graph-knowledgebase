@@ -11,6 +11,7 @@ import {
   CheckList,
   VIEWPORTS,
   assert,
+  assertEqual,
   buildProject,
   launchBrowser,
   shot,
@@ -115,6 +116,8 @@ async function runAppSuite(page, origin, spec, list) {
         for (const el of Array.from(document.querySelectorAll(selector))) {
           const rect = el.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) continue;
+          // Links inside rendered prose are text links, not standalone targets.
+          if (el.tagName === 'A' && el.closest('.kb-prose') !== null) continue;
           if (rect.width < 24 || rect.height < 24) {
             const name = el.getAttribute('aria-label') || el.textContent?.trim().slice(0, 18) || '';
             offenders.push(`${el.tagName.toLowerCase()}[${name}] ${Math.round(rect.width)}x${Math.round(rect.height)}`);
@@ -126,7 +129,7 @@ async function runAppSuite(page, origin, spec, list) {
     });
 
     if (spec?.appChecks) {
-      await spec.appChecks({ page, list, viewport, shot, origin });
+      await spec.appChecks({ page, list, viewport, shot, origin, assert, assertEqual });
     }
 
     await shot(page, `${phase}-${viewport.name}`);

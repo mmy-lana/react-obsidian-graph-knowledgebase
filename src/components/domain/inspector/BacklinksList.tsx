@@ -131,7 +131,7 @@ export function BacklinksList({
             onClick={() => setShowMentions((value) => !value)}
             aria-expanded={showMentions}
             data-testid={`${testId}-mentions-toggle`}
-            className="flex min-h-11 items-center justify-between rounded-md px-1 text-left text-xs font-semibold uppercase tracking-wider text-text-subtle hover:text-text-main md:min-h-0"
+            className="flex min-h-11 items-center justify-between rounded-md px-1 text-left text-xs font-semibold uppercase tracking-wider text-text-subtle hover:text-text-main md:min-h-8"
           >
             <span className="flex items-center gap-1.5">
               <Search className="h-3.5 w-3.5" />
