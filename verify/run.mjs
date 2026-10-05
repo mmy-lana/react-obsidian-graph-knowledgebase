@@ -91,9 +91,10 @@ async function runAppSuite(page, origin, spec, list) {
       assert(children > 0, '#root has no children');
     });
 
-    await list.check(`[${viewport.name}] no console errors`, () => {
-      const { errors, failedRequests } = page.diagnostics;
+    await list.check(`[${viewport.name}] no console errors or warnings`, () => {
+      const { errors, warnings, failedRequests } = page.diagnostics;
       assert(errors.length === 0, errors.join(' | ') || 'unknown console error');
+      assert(warnings.length === 0, warnings.join(' | ') || 'unknown console warning');
       assert(failedRequests.length === 0, failedRequests.join(' | ') || 'unknown failed request');
     });
 
