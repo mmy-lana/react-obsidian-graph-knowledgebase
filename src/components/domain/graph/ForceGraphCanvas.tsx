@@ -100,6 +100,7 @@ export function ForceGraphCanvas({
     panRef.current = pan;
   }, [zoomAt, pan]);
 
+
   // Pointer gesture bookkeeping.
   const gestureRef = useRef<{
     mode: 'idle' | 'pan' | 'drag' | 'pinch';
@@ -118,6 +119,22 @@ export function ForceGraphCanvas({
     lastY: 0,
     pinchDistance: 0,
   });
+
+  /**
+   * Keeps the camera on the active note.
+   *
+   * Switching notes from the explorer or the quick switcher otherwise leaves the
+   * viewport wherever the previous note was, so the selection can land off-screen.
+   * An in-flight drag or pan wins: yanking the camera mid-gesture would fight
+   * the pointer.
+   */
+  useEffect(() => {
+    if (!activeNoteId || size.width <= 0 || size.height <= 0) return;
+    if (gestureRef.current.mode !== 'idle') return;
+
+    centerOn(activeNoteId);
+  }, [activeNoteId, size.width, size.height, centerOn]);
+
 
   useEffect(() => {
     const container = containerRef.current;
@@ -386,6 +403,8 @@ const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
         data-testid="force-graph-canvas"
         data-node-count={nodes.length}
         data-zoom={zoom.toFixed(3)}
+        data-pan-x={offset.x.toFixed(2)}
+        data-pan-y={offset.y.toFixed(2)}
         data-paused={paused ? 'true' : 'false'}
         className="h-full w-full touch-none select-none"
         onPointerDown={handlePointerDown}

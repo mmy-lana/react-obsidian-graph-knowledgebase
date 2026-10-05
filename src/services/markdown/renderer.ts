@@ -8,7 +8,29 @@ const escapeHtml = (value: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+/**
+ * Reverses {@link escapeHtml} for the exact entity set it produces.
+ *
+ * Inline constructs run against the already-escaped document, so values that
+ * feed derived output (slugs, URLs, protocol checks) must be decoded first.
+ * `&amp;` is decoded last so an escaped literal `&amp;lt;` is not re-decoded
+ * into `<`.
+ */
+const decodeEntities = (value: string): string =>
+  value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
 const escapeAttribute = escapeHtml;
+
+/** Image sources limited to inert schemes: http(s), data:image, fragment, path. */
+const ALLOWED_IMAGE_SRC = /^(https?:|data:image\/|#|\/)/i;
+
+/** Anchor targets limited to inert schemes: http(s), mailto, in-document. */
+const ALLOWED_LINK_HREF = /^(https?:|mailto:|#)/i;
 
 /**
  * Inline markdown: wikilinks, tags, bold, italic, code, images, links, strikethrough.
@@ -31,26 +53,35 @@ function renderInline(text: string): string {
 
   // Wikilinks: [[Target]] and [[Target|Alias]].
   output = output.replace(/\[\[([^[\]|]+)(?:\|([^[\]]+))?\]\]/g, (_match, target: string, alias?: string) => {
-    const title = target.trim();
+    // The document is escaped, so decode before deriving the slug and re-using
+    // the fragments: `target`/`label` are already inert for attribute output.
+    const title = decodeEntities(target).trim();
     const label = (alias ?? target).trim();
     const href = `#/note/${encodeURIComponent(slugify(title))}`;
 
     return stash(
-      `<a href="${escapeAttribute(href)}" class="kb-wikilink" data-wikilink="${escapeAttribute(title)}" role="link" tabindex="0">${escapeHtml(label)}</a>`,
+      `<a href="${escapeAttribute(href)}" class="kb-wikilink" data-wikilink="${escapeAttribute(title)}" role="link" tabindex="0">${label}</a>`,
     );
   });
 
-  // Markdown images.
-  output = output.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_match, alt: string, src: string) =>
-    stash(`<img src="${escapeAttribute(src)}" alt="${escapeAttribute(alt)}" loading="lazy" class="max-w-full rounded" />`),
-  );
+  // Markdown images. Only inert schemes are emitted: http(s), data:image,
+  // document-relative fragments and paths. Anything else (javascript:, data:text,
+  // vbscript:, ...) degrades to its alt text so a note can never inject script.
+  output = output.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_match, alt: string, src: string) => {
+    const rawSrc = decodeEntities(src);
+    if (!ALLOWED_IMAGE_SRC.test(rawSrc)) return alt;
+
+    return stash(`<img src="${src}" alt="${alt}" loading="lazy" class="max-w-full rounded" />`);
+  });
 
   // Markdown links (safe protocols only).
   output = output.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label: string, href: string) => {
-    if (!/^(https?:|mailto:|#)/i.test(href)) return label;
-    const external = /^https?:/i.test(href);
+    const rawHref = decodeEntities(href);
+    if (!ALLOWED_LINK_HREF.test(rawHref)) return label;
+
+    const external = /^https?:/i.test(rawHref);
     return stash(
-      `<a href="${escapeAttribute(href)}"${external ? ' target="_blank" rel="noreferrer noopener"' : ''}>${escapeHtml(label)}</a>`,
+      `<a href="${href}"${external ? ' target="_blank" rel="noreferrer noopener"' : ''}>${label}</a>`,
     );
   });
 

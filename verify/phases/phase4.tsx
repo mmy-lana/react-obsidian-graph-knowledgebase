@@ -992,6 +992,10 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
         afterPinch / zoomBefore <= 1.07,
         `a clamped pinch frame must not multiply zoom (${zoomBefore} -> ${afterPinch})`,
       );
+      expect(
+        (await readPaintedPixels(canvas)).total > 0,
+        'graph stays on screen after an extreme pinch frame',
+      );
 
       // A sustained 120Hz pinch burst must stay inside the zoom clamp and keep
       // the graph framed around the pointer instead of flinging it away.
@@ -1003,8 +1007,14 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
       expect(sustained <= 4, `sustained pinch must respect the zoom clamp (${sustained})`);
       expect(sustained < 4, 'a realistic pinch burst must not slam into the clamp');
 
-      const painted = await readPaintedPixels(canvas);
-      expect(painted.total > 0, 'graph remains painted after sustained pinch');
+      // Zooming back in must recover immediately: no permanent runaway state.
+      for (let i = 0; i < 20; i += 1) {
+        await dispatchWheel(canvas, { deltaY: 15, ctrlKey: true });
+      }
+      await flush(80);
+      const recovered = Number(canvas.dataset.zoom);
+      expect(recovered < sustained, `pinch-in must reduce zoom (${sustained} -> ${recovered})`);
+      expect((await readPaintedPixels(canvas)).total > 0, 'graph is visible again after zooming back out');
 
       await view.unmount();
     }),
@@ -1017,7 +1027,7 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
       const canvas = view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!;
 
       const zoomBefore = Number(canvas.dataset.zoom);
-      const paintedBefore = await readPaintedPixels(canvas);
+      const panBefore = { x: Number(canvas.dataset.panX), y: Number(canvas.dataset.panY) };
 
       // Trackpad-like fractional pixel deltas: pan, never zoom.
       for (let i = 0; i < 6; i += 1) {
@@ -1026,17 +1036,15 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
       await flush(60);
 
       const zoomAfter = Number(canvas.dataset.zoom);
-      expectEqual(zoomAfter, zoomBefore, 'fractional two-finger scroll must not change zoom');
+      const panAfter = { x: Number(canvas.dataset.panX), y: Number(canvas.dataset.panY) };
 
-      const paintedAfter = await readPaintedPixels(canvas);
+      expectEqual(zoomAfter, zoomBefore, 'fractional two-finger scroll must not change zoom');
       expect(
-        paintedAfter.total > 0,
-        'graph stays rendered after panning (it moved, it did not disappear)',
+        Math.abs(panAfter.y - panBefore.y) > 20,
+        `two-finger scroll must pan the camera (${panBefore.y} -> ${panAfter.y})`,
       );
-      expect(
-        Math.abs(paintedAfter.centroidX - paintedBefore.centroidX) > 1,
-        'pan must actually move the rendered cluster',
-      );
+      expectEqual(panAfter.x, panBefore.x, 'vertical scroll must not drift horizontally');
+      expect((await readPaintedPixels(canvas)).total > 0, 'graph stays rendered while panning');
 
       // A large integer delta from a real mouse wheel zooms instead.
       await dispatchWheel(canvas, { deltaY: -120 });
@@ -1045,6 +1053,34 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
         Number(view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!.dataset.zoom) >
           zoomBefore,
         'discrete mouse wheel steps still zoom',
+      );
+
+      await view.unmount();
+    }),
+  );
+
+  results.push(
+    await check('DATA-07: selecting a note anchors the camera on it', async () => {
+      const view = await mount(<GraphSelectionHarness />);
+      await flush(220);
+
+      const canvas = () => view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!;
+      expect((await readPaintedPixels(canvas())).total > 0, 'graph painted on mount');
+
+      // Capture the painted centroid before switching notes.
+      const before = await readPaintedPixels(canvas());
+      const zoomBefore = Number(canvas().dataset.zoom);
+
+      await withAct(() => currentApi().setActiveNoteId('seed-note-4'));
+      await flush(200);
+
+      const after = await readPaintedPixels(canvas());
+      expect(after.total > 0, 'graph still painted after the selection changed');
+      expect(
+        Math.abs(after.centroidX - before.centroidX) > 1 ||
+          Math.abs(after.centroidY - before.centroidY) > 1 ||
+          Number(canvas().dataset.zoom) !== zoomBefore,
+        'camera must react to the active note changing',
       );
 
       await view.unmount();
@@ -1215,6 +1251,28 @@ function GraphHarness({ initialFilters = filters }: GraphHarnessProps) {
         physics={DEFAULT_GRAPH_PHYSICS}
         visuals={DEFAULT_GRAPH_VISUALS}
         onFiltersChange={setCurrentFilters}
+        onPhysicsChange={() => undefined}
+        onVisualsChange={() => undefined}
+        onSelectNote={notes.setActiveNoteId}
+      />
+    </div>
+  );
+}
+
+/** Graph harness whose active note can be switched from the test. */
+function GraphSelectionHarness() {
+  const notes = useNotes();
+  api = notes;
+
+  return (
+    <div style={{ height: 320, width: 480 }}>
+      <ForceGraphCanvas
+        notes={notes.notes}
+        activeNoteId={notes.activeNoteId}
+        filters={filters}
+        physics={DEFAULT_GRAPH_PHYSICS}
+        visuals={DEFAULT_GRAPH_VISUALS}
+        onFiltersChange={() => undefined}
         onPhysicsChange={() => undefined}
         onVisualsChange={() => undefined}
         onSelectNote={notes.setActiveNoteId}

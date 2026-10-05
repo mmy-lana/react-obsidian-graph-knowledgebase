@@ -85,6 +85,7 @@ async function runAppSuite(page, origin, spec, list) {
     });
     await page.goto(origin);
     await page.waitForSelector('#root > *', { timeout: 15_000 });
+    await page.settle();
 
     await list.check(`[${viewport.name}] boots with a rendered root`, async () => {
       const children = await page.evaluate(() => document.querySelectorAll('#root > *').length);

@@ -297,5 +297,43 @@ export async function runPhase1(): Promise<HarnessCheck[]> {
     }),
   );
 
+  results.push(
+    await check('SEC-02: markdown images reject unsafe protocols', () => {
+      const safe = renderMarkdown('![shot](https://example.com/a.png) ![local](/img/a.png) ![frag](#x)');
+      expect(safe.includes('<img src="https://example.com/a.png"'), 'https image rendered');
+      expect(safe.includes('<img src="/img/a.png"'), 'relative path image rendered');
+      expect(safe.includes('<img src="#x"'), 'fragment image rendered');
+
+      const dataImage = renderMarkdown('![inline](data:image/png;base64,AAAA)');
+      expect(dataImage.includes('src="data:image/png;base64,AAAA"'), 'data:image allowed');
+
+      const blocked = renderMarkdown(
+        [
+          '![xss](javascript:alert(1))',
+          '![data](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)',
+          '![vbs](vbscript:msgbox(1))',
+          '![file](file:///etc/passwd)',
+        ].join('\n'),
+      );
+
+      expect(!blocked.includes('<img'), 'no img element emitted for unsafe schemes');
+      expect(!blocked.toLowerCase().includes('javascript:'), 'javascript scheme stripped');
+      expect(!blocked.toLowerCase().includes('vbscript:'), 'vbscript scheme stripped');
+      expect(!blocked.toLowerCase().includes('data:text/html'), 'html data uri stripped');
+      expect(!blocked.includes('file:///'), 'file scheme stripped');
+      expect(blocked.includes('xss'), 'alt text is preserved instead');
+      expect(blocked.includes('file'), 'alt text preserved for file scheme');
+    }),
+  );
+
+  results.push(
+    await check('SEC-02: image attributes cannot break out of the src attribute', () => {
+      const hostile = renderMarkdown('![a](https://x.test/" onerror="alert(1))'.replace(' ', '%20'));
+      expect(!hostile.includes('onerror="alert'), 'injected event handler never reaches the DOM');
+      expect(hostile.includes('&quot;'), 'quotes are escaped exactly once inside the attribute');
+      expect(!hostile.includes('&amp;quot;'), 'attributes are never double escaped');
+    }),
+  );
+
   return results;
 }

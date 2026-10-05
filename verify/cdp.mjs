@@ -285,6 +285,18 @@ export class Page {
     return result;
   }
 
+  /**
+   * Lets the new document paint one frame, then clears diagnostics.
+   *
+   * Console messages queued by the previous document can still arrive right
+   * after `Page.navigate`; resetting before that flush would attribute them to
+   * the wrong page.
+   */
+  async settle() {
+    await this.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+    this.diagnostics.reset();
+  }
+
   async reload() {
     const loaded = this.#waitForEvent('Page.loadEventFired', 30_000);
     await this.send('Page.reload');
