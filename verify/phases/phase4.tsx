@@ -2,7 +2,7 @@
  * Phase 4 smoke suite — reactive data layer, markdown renderer, force engine,
  * graph builder, editor and canvas rendering, all against a real browser.
  */
-import { useRef, useState } from 'react';
+import { StrictMode, useRef, useState } from 'react';
 import { check, expect, expectEqual, type HarnessCheck } from '../support';
 import {
   blurElement,
@@ -1053,6 +1053,56 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
         Number(view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!.dataset.zoom) >
           zoomBefore,
         'discrete mouse wheel steps still zoom',
+      );
+
+      await view.unmount();
+    }),
+  );
+
+  results.push(
+    await check('PERF-01: StrictMode does not corrupt the zoom anchor', async () => {
+      const view = await mount(
+        <StrictMode>
+          <GraphHarness />
+        </StrictMode>,
+      );
+      await flush(220);
+
+      const canvas = view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!;
+      const rect = canvas.getBoundingClientRect();
+
+      // An off-centre anchor: a centre-focused zoom has offset terms that cancel,
+      // so only an asymmetric pointer exposes a mis-applied offset transform.
+      const anchorX = rect.width * 0.8;
+      const anchorY = rect.height * 0.75;
+
+      const worldUnderAnchor = () => {
+        const [width, height] = canvas.dataset.canvasSize!.split('x').map(Number);
+        const zoom = Number(canvas.dataset.zoom);
+        const panX = Number(canvas.dataset.panX);
+        const panY = Number(canvas.dataset.panY);
+        return {
+          x: (anchorX - width / 2 - panX) / zoom,
+          y: (anchorY - height / 2 - panY) / zoom,
+        };
+      };
+
+      const before = worldUnderAnchor();
+
+      await dispatchWheel(canvas, {
+        deltaY: -120,
+        clientX: rect.left + anchorX,
+        clientY: rect.top + anchorY,
+      });
+      await flush(60);
+
+      const after = worldUnderAnchor();
+      const driftX = Math.abs(after.x - before.x);
+      const driftY = Math.abs(after.y - before.y);
+
+      expect(
+        driftX < 0.5 && driftY < 0.5,
+        `the world point under the pointer must not move (drift ${driftX.toFixed(2)}, ${driftY.toFixed(2)})`,
       );
 
       await view.unmount();
