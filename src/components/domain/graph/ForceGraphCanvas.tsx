@@ -317,10 +317,12 @@ export function ForceGraphCanvas({
   };
 
   /**
-   * Native non-passive wheel listener supporting:
-   * 1. macOS trackpad pinch gestures (WheelEvent with ctrlKey: true) via smooth continuous scaling.
-   * 2. Two-finger trackpad panning (deltaX != 0 or small fractional deltaY) without zooming.
-   * 3. Discrete mouse wheel scrolling with focal zoom anchored to the cursor position.
+   * Native non-passive wheel listener calibrated for macOS hardware.
+   *
+   * Trackpad input arrives at 60-120Hz, so an unclamped exponential factor
+   * compounds into 10x/0.1x jumps within milliseconds and flings the graph off
+   * screen. Pinch deltas are therefore clamped per frame and damped, and
+   * two-finger scroll is routed to panning instead of zooming.
    */
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -333,20 +335,21 @@ export function ForceGraphCanvas({
       const pointerX = event.clientX - rect.left;
       const pointerY = event.clientY - rect.top;
 
+      // Trackpad pinch is delivered as a ctrl-modified wheel event.
       if (event.ctrlKey) {
-        // Continuous smooth zoom for trackpad pinch gestures
-        const factor = Math.exp(-event.deltaY * 0.01);
-        zoomAtRef.current(factor, pointerX, pointerY);
+        const clampedDelta = Math.max(-15, Math.min(15, event.deltaY));
+        zoomAtRef.current(Math.exp(-clampedDelta * 0.004), pointerX, pointerY);
         return;
       }
 
-      // Discrete mouse wheel vs trackpad two-finger pan discrimination
+      // A real mouse wheel reports line/page deltas or large integer steps with
+      // no horizontal component; trackpad scrolling reports small pixel deltas.
       const isMouseWheel =
-        event.deltaMode !== 0 || (event.deltaX === 0 && Math.abs(event.deltaY) >= 40);
+        event.deltaMode !== 0 ||
+        (event.deltaX === 0 && Number.isInteger(event.deltaY) && Math.abs(event.deltaY) >= 60);
 
       if (isMouseWheel) {
-        const factor = Math.pow(0.998, event.deltaY);
-        zoomAtRef.current(factor, pointerX, pointerY);
+        zoomAtRef.current(event.deltaY < 0 ? 1.08 : 0.92, pointerX, pointerY);
       } else {
         panRef.current(-event.deltaX, -event.deltaY);
       }

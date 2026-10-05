@@ -61,13 +61,38 @@ export async function mount(element: React.ReactElement): Promise<Mounted> {
  */
 export async function dispatchWheel(
   element: Element | null,
-  { deltaY = -120 }: { deltaY?: number } = {},
+  {
+    deltaY = -120,
+    deltaX = 0,
+    deltaMode = 0,
+    ctrlKey = false,
+    clientX,
+    clientY,
+  }: {
+    deltaY?: number;
+    deltaX?: number;
+    deltaMode?: number;
+    ctrlKey?: boolean;
+    clientX?: number;
+    clientY?: number;
+  } = {},
 ): Promise<boolean> {
   if (!element) throw new Error('wheel target does not exist');
 
+  const rect = element.getBoundingClientRect();
+
   let defaultPrevented = false;
   await act(async () => {
-    const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true });
+    const event = new WheelEvent('wheel', {
+      deltaY,
+      deltaX,
+      deltaMode,
+      ctrlKey,
+      bubbles: true,
+      cancelable: true,
+      clientX: clientX ?? rect.left + rect.width / 2,
+      clientY: clientY ?? rect.top + rect.height / 2,
+    });
     element.dispatchEvent(event);
     defaultPrevented = event.defaultPrevented;
   });

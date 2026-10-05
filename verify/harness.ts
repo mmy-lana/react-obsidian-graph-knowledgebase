@@ -50,8 +50,12 @@ function installActWarningFilter(): () => void {
   const ACT_WARNING = 'not wrapped in act';
   const original = console.error;
   console.error = (...args: unknown[]) => {
-    const [first] = args;
-    if (typeof first === 'string' && first.includes(ACT_WARNING)) return;
+    // React emits the warning as a format string plus substitution arguments, so
+    // every argument has to be inspected before deciding to drop the call.
+    const text = args
+      .map((arg) => (typeof arg === 'string' ? arg : ''))
+      .join(' ');
+    if (text.includes(ACT_WARNING)) return;
     original(...(args as Parameters<typeof original>));
   };
   return () => {

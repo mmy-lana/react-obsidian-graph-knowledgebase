@@ -28,6 +28,8 @@ export interface GraphSimulationState {
 
   zoomBy: (factor: number) => void;
   zoomAt: (factor: number, screenX?: number, screenY?: number) => void;
+  /** Frames the whole graph inside the canvas viewport with padding. */
+  fitToView: (paddingRatio?: number) => void;
   resetView: () => void;
   pan: (deltaX: number, deltaY: number) => void;
   centerOn: (nodeId: string) => void;
@@ -71,6 +73,8 @@ export function useGraphSimulation({
   localOnly = false,
 }: UseGraphSimulationOptions): GraphSimulationState {
   const simulationRef = useRef<ForceDirectedSimulation | null>(null);
+  const nodesRef = useRef<GraphNode[]>([]);
+  const hasAutoCenteredRef = useRef(false);
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [alpha, setAlpha] = useState(1);
   const [paused, setPaused] = useState(false);
@@ -90,6 +94,7 @@ export function useGraphSimulation({
     const simulation = new ForceDirectedSimulation(width || 1, height || 1, physics);
     simulation.onTick((nextNodes) => {
       // Mutated in place by the engine; publish a shallow copy for React.
+      nodesRef.current = nextNodes;
       setNodes([...nextNodes]);
       setAlpha(simulation.getAlpha());
     });
@@ -113,6 +118,7 @@ export function useGraphSimulation({
 
   useEffect(() => {
     simulationRef.current?.setData(graph.nodes, graph.edges);
+    nodesRef.current = graph.nodes;
     setNodes([...graph.nodes]);
     setAlpha(1);
     simulationRef.current?.start();
@@ -153,12 +159,64 @@ export function useGraphSimulation({
     [],
   );
 
+  /**
+   * Frames every laid-out node inside the canvas viewport.
+   *
+   * Without this the camera stays at its default offset while physics runs, so
+   * a graph that settles away from the world origin (the usual case once node
+   * count grows) ends up stacked in a corner or off-screen.
+   *
+   * @param paddingRatio empty space kept around the cluster, per axis.
+   */
+  const fitToView = useCallback(
+    (paddingRatio = 0.18) => {
+      const positioned = (simulationRef.current?.getNodes() ?? nodesRef.current).filter(
+        (node) => Number.isFinite(node.x) && Number.isFinite(node.y),
+      );
+
+      if (positioned.length === 0 || width <= 0 || height <= 0) {
+        setZoom(1);
+        setOffset({ x: 0, y: 0 });
+        return;
+      }
+
+      let minX = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+
+      for (const node of positioned) {
+        const x = node.x ?? 0;
+        const y = node.y ?? 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+
+      const boxWidth = maxX - minX;
+      const boxHeight = maxY - minY;
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const usable = Math.max(0.1, 1 - paddingRatio * 2);
+
+      const scale = Math.min(
+        (width * usable) / Math.max(boxWidth, 80),
+        (height * usable) / Math.max(boxHeight, 80),
+      );
+      const targetZoom = clamp(scale, 0.5, 1.8);
+
+      setZoom(targetZoom);
+      setOffset({ x: -centerX * targetZoom, y: -centerY * targetZoom });
+    },
+    [width, height],
+  );
+
   const resetView = useCallback(() => {
-    setZoom(1);
-    setOffset({ x: 0, y: 0 });
+    fitToView();
     simulationRef.current?.unpinAll();
     simulationRef.current?.reheat(0.8);
-  }, []);
+  }, [fitToView]);
 
   const centerOn = useCallback(
     (nodeId: string) => {
@@ -172,6 +230,21 @@ export function useGraphSimulation({
     },
     [],
   );
+
+  /**
+   * Frames the graph once the container has real dimensions.
+   *
+   * The engine is constructed before `ResizeObserver` reports the canvas size,
+   * so without this the first frames are computed against a zero-sized viewport
+   * and the cluster is left wherever the initial spawn placed it.
+   */
+  useEffect(() => {
+    if (width <= 0 || height <= 0 || nodes.length === 0 || hasAutoCenteredRef.current) return;
+
+    hasAutoCenteredRef.current = true;
+    if (activeNoteId) centerOn(activeNoteId);
+    else fitToView();
+  }, [width, height, nodes.length, activeNoteId, centerOn, fitToView]);
 
   const dragNode = useCallback((nodeId: string, x: number, y: number, pinned: boolean) => {
     simulationRef.current?.setNodePosition(nodeId, x, y, pinned);
@@ -248,6 +321,7 @@ export function useGraphSimulation({
     paused,
     zoomBy,
     zoomAt,
+    fitToView,
     resetView,
     pan,
     centerOn,

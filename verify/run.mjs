@@ -159,7 +159,12 @@ async function main() {
     const page = await browser.newPage();
 
     if (spec?.skipModuleSuite !== true) {
+      // Components are mounted programmatically in the module harness, so
+      // React's act-environment notice is expected there. The production app
+      // suite below keeps zero tolerance for every console message.
+      page.suppressedConsolePatterns = ['not wrapped in act'];
       await runModuleSuite(page, dev.origin, list);
+      page.suppressedConsolePatterns = [];
     }
 
     await runAppSuite(page, preview.origin, spec, list);

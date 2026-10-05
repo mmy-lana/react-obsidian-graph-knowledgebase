@@ -186,6 +186,12 @@ export class Page {
     this.connection = connection;
     this.sessionId = sessionId;
     this.targetId = targetId;
+    /**
+     * Console patterns tolerated by this page. Only the in-page module harness
+     * sets them (React's act-environment notice); the production app suite
+     * tolerates nothing.
+     */
+    this.suppressedConsolePatterns = [];
     this.diagnostics = {
       errors: [],
       warnings: [],
@@ -211,25 +217,33 @@ export class Page {
     this.connection.on((message) => {
       if (message.sessionId !== this.sessionId) return;
 
+      const suppressed = (text) =>
+        this.suppressedConsolePatterns.some((pattern) => text.includes(pattern));
+
       if (message.method === 'Runtime.consoleAPICalled') {
         const { type, args } = message.params;
         const text = (args ?? []).map(formatRemoteObject).join(' ');
-        if (type === 'error') this.diagnostics.errors.push(`console.error: ${text}`);
-        else if (type === 'warning' || type === 'warn') this.diagnostics.warnings.push(text);
+        if (type === 'error') {
+          if (!suppressed(text)) this.diagnostics.errors.push(`console.error: ${text}`);
+        } else if (type === 'warning' || type === 'warn') {
+          if (!suppressed(text)) this.diagnostics.warnings.push(text);
+        }
       }
 
       if (message.method === 'Runtime.exceptionThrown') {
         const details = message.params.exceptionDetails;
         const text = details.exception?.description ?? details.text ?? 'unknown exception';
-        this.diagnostics.errors.push(`pageerror: ${text}`);
+        if (!suppressed(text)) this.diagnostics.errors.push(`pageerror: ${text}`);
       }
 
       if (message.method === 'Log.entryAdded') {
         const entry = message.params.entry;
         if (entry.level === 'error') {
-          this.diagnostics.errors.push(`log(${entry.source}): ${entry.text}`);
+          if (!suppressed(entry.text)) {
+            this.diagnostics.errors.push(`log(${entry.source}): ${entry.text}`);
+          }
         } else if (entry.level === 'warning') {
-          this.diagnostics.warnings.push(`${entry.source}: ${entry.text}`);
+          if (!suppressed(entry.text)) this.diagnostics.warnings.push(`${entry.source}: ${entry.text}`);
         }
       }
 

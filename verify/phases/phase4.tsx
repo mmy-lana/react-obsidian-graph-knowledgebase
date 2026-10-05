@@ -42,6 +42,46 @@ const filters = {
   maxDepth: 0,
 };
 
+/**
+ * Reads the painted pixels of a canvas, optionally restricted to a region.
+ * Returns the opaque pixel count and the centroid of painted pixels, which is
+ * how the suites assert that the graph is actually framed in the viewport.
+ */
+async function readPaintedPixels(
+  canvas: HTMLCanvasElement,
+  region?: { x: number; y: number; w: number; h: number },
+): Promise<{ total: number; centroidX: number; centroidY: number }> {
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('canvas 2d context unavailable');
+
+  const x = Math.max(0, Math.floor(region?.x ?? 0));
+  const y = Math.max(0, Math.floor(region?.y ?? 0));
+  const w = Math.max(1, Math.floor(region?.w ?? canvas.width));
+  const h = Math.max(1, Math.floor(region?.h ?? canvas.height));
+
+  const { data } = context.getImageData(x, y, w, h);
+  let total = 0;
+  let sumX = 0;
+  let sumY = 0;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3];
+    if (alpha === 0) continue;
+    const pixel = index / 4;
+    const pixelX = pixel % w;
+    const pixelY = Math.floor(pixel / w);
+    total += 1;
+    sumX += pixelX;
+    sumY += pixelY;
+  }
+
+  return {
+    total,
+    centroidX: total === 0 ? 0 : sumX / total,
+    centroidY: total === 0 ? 0 : sumY / total,
+  };
+}
+
 async function vault() {
   const db = getDb();
   await db.delete();
@@ -744,8 +784,13 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
       expectEqual(orphanSwitch.getAttribute('aria-checked'), 'false', 'orphan toggle flips');
 
       await clickTarget(view.query('[data-testid="graph-reset"]'));
-      await flush();
-      expectEqual(canvas.getAttribute('data-zoom'), '1.000', 'reset restores zoom');
+      await flush(120);
+      const resetZoom = Number(canvas.getAttribute('data-zoom'));
+      expect(
+        resetZoom >= 0.5 && resetZoom <= 1.8,
+        `reset frames the graph within the fit clamp (zoom ${resetZoom})`,
+      );
+      expect((await readPaintedPixels(canvas)).total > 0, 'graph is repainted after reset');
 
       await view.unmount();
     }),
@@ -868,6 +913,139 @@ export async function runPhase4(): Promise<HarnessCheck[]> {
 
       const zoomAfter = Number(view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!.dataset.zoom);
       expect(zoomAfter > zoomBefore, `wheel-up should zoom in (${zoomBefore} -> ${zoomAfter})`);
+
+      await view.unmount();
+    }),
+  );
+
+  results.push(
+    await check('DATA-07: the graph is framed in the viewport after dimensions settle', async () => {
+      const view = await mount(<GraphHarness />);
+      await flush(220);
+
+      const canvas = view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!;
+      expect(canvas.width > 0 && canvas.height > 0, 'canvas has a real backing store');
+
+      // Read the rendered pixels: the middle of the canvas must contain painted
+      // node fill, which is only true when the cluster was framed in view.
+      const painted = await readPaintedPixels(canvas);
+      expect(painted.total > 0, 'canvas rendered graph content');
+
+      const centreBox = { x: canvas.width / 4, y: canvas.height / 4, w: canvas.width / 2, h: canvas.height / 2 };
+      const centrePixels = await readPaintedPixels(canvas, centreBox);
+      expect(
+        centrePixels.total > 0,
+        `nodes must be framed near the canvas centre (${centrePixels.total} painted pixels in the middle box)`,
+      );
+      expect(
+        centrePixels.total >= painted.total * 0.25,
+        `most of the graph should sit in the central region (${centrePixels.total} of ${painted.total})`,
+      );
+
+      await view.unmount();
+    }),
+  );
+
+  results.push(
+    await check('DATA-07: reset view fits the cluster instead of hardcoding zoom 1', async () => {
+      const view = await mount(<GraphHarness />);
+      await flush(200);
+
+      // Zoom far out, then reset: the camera must re-frame the nodes.
+      const canvas = view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!;
+      for (let i = 0; i < 12; i += 1) {
+        await dispatchWheel(canvas, { deltaY: 120 });
+      }
+      await flush(80);
+      const zoomedOut = Number(canvas.dataset.zoom);
+      expect(zoomedOut < 1, `repeated wheel-down should zoom out (zoom ${zoomedOut})`);
+
+      await clickTarget(view.query('[data-testid="graph-reset"]'));
+      await flush(140);
+
+      const resetZoom = Number(canvas.dataset.zoom);
+      expect(resetZoom > zoomedOut, `reset must restore a framing zoom (${zoomedOut} -> ${resetZoom})`);
+
+      const paintedAfterReset = await readPaintedPixels(canvas);
+      expect(paintedAfterReset.total > 0, 'graph is repainted after the reset');
+
+      await view.unmount();
+    }),
+  );
+
+  results.push(
+    await check('PERF-01: trackpad pinch is clamped and damped', async () => {
+      const view = await mount(<GraphHarness />);
+      await flush(200);
+      const canvas = view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!;
+
+      const zoomBefore = Number(canvas.dataset.zoom);
+
+      // A single absurd pinch frame (deltaY far beyond any real trackpad value)
+      // must move the zoom by a bounded, smooth amount rather than exploding.
+      await dispatchWheel(canvas, { deltaY: -900, ctrlKey: true });
+      await flush(40);
+      const afterPinch = Number(canvas.dataset.zoom);
+
+      expect(afterPinch > zoomBefore, 'pinch-out zooms in');
+      expect(
+        afterPinch / zoomBefore <= 1.07,
+        `a clamped pinch frame must not multiply zoom (${zoomBefore} -> ${afterPinch})`,
+      );
+
+      // A sustained 120Hz pinch burst must stay inside the zoom clamp and keep
+      // the graph framed around the pointer instead of flinging it away.
+      for (let i = 0; i < 20; i += 1) {
+        await dispatchWheel(canvas, { deltaY: -15, ctrlKey: true });
+      }
+      await flush(60);
+      const sustained = Number(canvas.dataset.zoom);
+      expect(sustained <= 4, `sustained pinch must respect the zoom clamp (${sustained})`);
+      expect(sustained < 4, 'a realistic pinch burst must not slam into the clamp');
+
+      const painted = await readPaintedPixels(canvas);
+      expect(painted.total > 0, 'graph remains painted after sustained pinch');
+
+      await view.unmount();
+    }),
+  );
+
+  results.push(
+    await check('PERF-01: two-finger scroll pans instead of zooming', async () => {
+      const view = await mount(<GraphHarness />);
+      await flush(200);
+      const canvas = view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!;
+
+      const zoomBefore = Number(canvas.dataset.zoom);
+      const paintedBefore = await readPaintedPixels(canvas);
+
+      // Trackpad-like fractional pixel deltas: pan, never zoom.
+      for (let i = 0; i < 6; i += 1) {
+        await dispatchWheel(canvas, { deltaY: 12.5, deltaX: 0 });
+      }
+      await flush(60);
+
+      const zoomAfter = Number(canvas.dataset.zoom);
+      expectEqual(zoomAfter, zoomBefore, 'fractional two-finger scroll must not change zoom');
+
+      const paintedAfter = await readPaintedPixels(canvas);
+      expect(
+        paintedAfter.total > 0,
+        'graph stays rendered after panning (it moved, it did not disappear)',
+      );
+      expect(
+        Math.abs(paintedAfter.centroidX - paintedBefore.centroidX) > 1,
+        'pan must actually move the rendered cluster',
+      );
+
+      // A large integer delta from a real mouse wheel zooms instead.
+      await dispatchWheel(canvas, { deltaY: -120 });
+      await flush(60);
+      expect(
+        Number(view.query<HTMLCanvasElement>('[data-testid="force-graph-canvas"]')!.dataset.zoom) >
+          zoomBefore,
+        'discrete mouse wheel steps still zoom',
+      );
 
       await view.unmount();
     }),
